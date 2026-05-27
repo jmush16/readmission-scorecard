@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "audit": "tsx cli/audit.ts"
+    "build:data": "tsx scripts/build-snapshot.ts",
+    "benchmark": "tsx cli/benchmark.ts"
   },
   "devDependencies": {
     "@types/node": "^25.9.1",

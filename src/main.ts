@@ -1,276 +1,293 @@
 import "./styles.css";
-import type { Audience, AuditFacts, AuditResult, CountyId, RoleId } from "./types";
-import { runAudit } from "./lib/scoring";
-import { auditPackage, memoText, agentPrompt } from "./lib/exports";
-import { audienceForRole } from "./data/roleViews";
-import {
-  roleOptions,
-  countyOptions,
-  prioritizationField,
-  selectFields,
-  defaultFactSelections,
-  DISCHARGES_DEFAULT,
-} from "./data/questions";
-import { SUCCESS_MEASURES } from "./data/copy";
+import "./benchmark.css";
+import type {
+  BenchmarkResult,
+  ConditionBenchmark,
+  HospitalIndexEntry,
+  HospitalRecord,
+  SnapshotManifest,
+} from "./lib/hrrp/types";
+import { benchmarkHospital, statePenaltyCount } from "./lib/hrrp/benchmark";
 
-const roleBlurbs: Record<RoleId, string> = {
-  aco: "You own total cost of care and the quality metrics.",
-  pop: "You decide which programs get funded and scaled.",
-  operator: "You run the discharge follow-up every day.",
-  medecon: "You answer for utilization and spend.",
-};
+const BASE = import.meta.env.BASE_URL;
+const root = document.getElementById("root")!;
+const restartBtn = document.getElementById("restart") as HTMLButtonElement;
 
-const PILOT_EMAIL =
-  "mailto:joel@enduranthealthspan.com?subject=HF%20follow-up%20readiness%20pilot";
+let index: HospitalIndexEntry[] = [];
+let manifest: SnapshotManifest;
 
-const $ = <T extends HTMLElement = HTMLElement>(id: string) =>
-  document.getElementById(id) as T | null;
-
-function clamp(value: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, value));
+async function loadData() {
+  const [m, idx] = await Promise.all([
+    fetch(`${BASE}data/manifest.json`).then((r) => r.json()),
+    fetch(`${BASE}data/hospitals.json`).then((r) => r.json()),
+  ]);
+  manifest = m;
+  index = idx;
+  const period = `${manifest.hrrpPeriod.start}–${manifest.hrrpPeriod.end}`;
+  document.getElementById("provenance")!.textContent =
+    `Source: CMS Hospital Readmissions Reduction Program (dataset ${manifest.sources.hrrp}), ` +
+    `period ${period}. Public, non-PHI. ${manifest.counts.hospitals.toLocaleString()} hospitals.`;
 }
 
-function scoreColor(score: number): string {
-  if (score < 45) return "var(--rose)";
-  if (score < 68) return "var(--amber)";
-  if (score < 84) return "var(--blue)";
-  return "var(--green)";
+// ---------- Landing ----------
+
+function renderLanding() {
+  restartBtn.hidden = true;
+  root.innerHTML = `
+    <section class="landing">
+      <div class="eyebrow" style="justify-content:center">Care transitions intelligence</div>
+      <h1>Is your hospital being penalized for readmissions — and how do you compare?</h1>
+      <p class="lede">CMS publishes every hospital's 30-day readmission performance, but as 18,000 raw rows
+      with no ranking. We assemble it: your numbers, your penalty status, and where you stand against the
+      hospitals next to you.</p>
+      <div class="doors">
+        <button class="door" type="button" id="doorOperator">
+          <span class="verb">Benchmark my hospital</span>
+          <span class="who">For the people who run the work: Director of Care Transitions,
+          Care Management / Care Coordination Lead, Transitional Care RN, Readmission-Reduction
+          Program Coordinator.</span>
+          <span class="go">See our numbers vs. our peers →</span>
+        </button>
+        <div class="door coming-soon" id="doorMarket">
+          <span class="soon-tag">Coming soon</span>
+          <span class="verb">Map my market</span>
+          <span class="who">For the people who own the risk: ACO Medical Director, CMO,
+          VP Population Health, VP Value-Based Care, Medical Economics / CFO.</span>
+          <span class="go">Rank every hospital in a market by penalty exposure.</span>
+        </div>
+      </div>
+    </section>`;
+  document.getElementById("doorOperator")!.addEventListener("click", renderSearch);
 }
 
-// ---------- Build the form from the data modules ----------
+// ---------- Hospital search ----------
 
-function buildSelect(el: HTMLSelectElement, options: { value: string; label: string }[]) {
-  el.innerHTML = options
-    .map((o) => `<option value="${o.value}">${o.label}</option>`)
-    .join("");
-}
+function renderSearch() {
+  restartBtn.hidden = false;
+  root.innerHTML = `
+    <section class="landing" style="padding-bottom:0">
+      <div class="eyebrow" style="justify-content:center">Benchmark my hospital</div>
+      <h1 style="font-size:clamp(28px,3.4vw,40px)">Find your hospital</h1>
+      <p class="lede">Type your hospital's name. Everything that follows is CMS's published data.</p>
+    </section>
+    <div class="search-card">
+      <div class="search-box">
+        <input id="q" type="text" autocomplete="off" placeholder="e.g. Winchester Hospital" aria-label="Hospital name">
+        <div class="results" id="results" role="listbox"></div>
+      </div>
+    </div>`;
 
-function buildForm() {
-  buildSelect($("role") as HTMLSelectElement, roleOptions.map((r) => ({ value: r.value, label: r.label })));
-  buildSelect(
-    $("county") as HTMLSelectElement,
-    countyOptions.map((c) => ({ value: c.value, label: c.label })),
-  );
-  ($("discharges") as HTMLInputElement).value = String(DISCHARGES_DEFAULT);
+  const q = document.getElementById("q") as HTMLInputElement;
+  const results = document.getElementById("results")!;
+  q.focus();
 
-  // Prioritization radios
-  ($("prioritizationLabel") as HTMLElement).textContent = prioritizationField.label;
-  const choices = $("prioritizationChoices") as HTMLElement;
-  choices.innerHTML = prioritizationField.options
-    .map(
-      (o) => `
-      <label class="choice">
-        <input type="radio" name="visibility" value="${o.value}" ${
-        o.value === prioritizationField.default ? "checked" : ""
-      }>
-        <span>${o.label}</span>
-      </label>`,
-    )
-    .join("");
-
-  // The rest of the selects
-  const wrap = $("selectFields") as HTMLElement;
-  wrap.innerHTML = selectFields
-    .map((f) => {
-      const opts = f.options
-        .map(
-          (o) =>
-            `<option value="${o.value}" ${o.value === f.default ? "selected" : ""}>${o.label}</option>`,
-        )
-        .join("");
-      const help = f.help ? `<small>${f.help}</small>` : "";
-      return `
-        <div class="field" style="margin-top:16px">
-          <label for="${f.id}">${f.label}</label>
-          <select id="${f.id}">${opts}</select>
-          ${help}
-        </div>`;
-    })
-    .join("");
-}
-
-// ---------- Read facts from the DOM ----------
-
-function readFacts(): AuditFacts {
-  const num = (id: string) => Number(($(id) as HTMLSelectElement | HTMLInputElement).value);
-  const selections = defaultFactSelections();
-  const visibility = Number(
-    (document.querySelector('input[name="visibility"]:checked') as HTMLInputElement).value,
-  );
-  return {
-    role: ($("role") as HTMLSelectElement).value as RoleId,
-    county: ($("county") as HTMLSelectElement).value as CountyId,
-    monthlyDischarges: clamp(num("discharges") || 0, 10, 5000),
-    visibility,
-    followup: num("followup") || selections.followup,
-    meds: num("meds") || selections.meds,
-    teachback: num("teachback") || selections.teachback,
-    owner: num("owner") || selections.owner,
-    closure: num("closure") || selections.closure,
-    capacity: num("capacity") || selections.capacity,
-  };
-}
-
-// ---------- Render ----------
-
-let current: AuditResult;
-
-function render() {
-  current = runAudit(readFacts());
-  renderSummary(current);
-  renderDimensions(current);
-  renderFailureMap(current);
-  renderOperator(current);
-  renderRiskOwner(current);
-}
-
-function renderSummary(r: AuditResult) {
-  const ring = $("scoreRing")!;
-  const color = scoreColor(r.score);
-  ring.style.setProperty("--score", String(r.score));
-  ring.style.background = `conic-gradient(${color} ${r.score}%, #e8f0f7 0)`;
-  ($("scoreValue") as HTMLElement).textContent = String(r.score);
-
-  const label = $("statusLabel")!;
-  label.textContent = r.status.label;
-  label.style.background =
-    r.score < 45 ? "var(--surface-rose)" : r.score < 68 ? "#fff7e8" : r.score < 84 ? "var(--surface-blue)" : "var(--surface-green)";
-  label.style.color =
-    r.score < 45 ? "var(--rose)" : r.score < 68 ? "#9a5b0f" : r.score < 84 ? "var(--blue-deep)" : "var(--green)";
-
-  ($("summaryHeadline") as HTMLElement).textContent = r.status.headline;
-  ($("summaryCopy") as HTMLElement).textContent = r.status.copy;
-  ($("firstBreak") as HTMLElement).textContent = r.firstBreak;
-  ($("pilotWedge") as HTMLElement).textContent = r.pilotWedge;
-  ($("proofTarget") as HTMLElement).textContent = r.proofTarget;
-}
-
-function renderDimensions(r: AuditResult) {
-  ($("dimensions") as HTMLElement).innerHTML = r.dimensions
-    .map(
-      (d) => `
-      <article class="dimension">
-        <div class="dimension-head"><b>${d.label}</b><span>${d.score}/100</span></div>
-        <div class="bar"><i style="width:${d.score}%; background:${scoreColor(d.score)}"></i></div>
-        <p>${d.help}</p>
-      </article>`,
-    )
-    .join("");
-}
-
-function renderFailureMap(r: AuditResult) {
-  const html = r.failureMap
-    .map(
-      ({ day, title, body }) => `
-      <article class="timeline-item">
-        <div class="timeline-day">${day}</div>
-        <div class="timeline-card"><strong>${title}</strong><p>${body}</p></div>
-      </article>`,
-    )
-    .join("");
-  for (const id of ["failureMap", "failureMapSecondary"]) {
-    const el = $(id);
-    if (el) el.innerHTML = html;
-  }
-}
-
-function renderOperator(r: AuditResult) {
-  const ov = $("operatorView");
-  if (ov) ov.textContent = r.roleView.operator;
-  const ps = $("operatorPublicSupport");
-  if (ps) ps.textContent = `${r.county.context} ${r.county.support}`;
-}
-
-function renderRiskOwner(r: AuditResult) {
-  const set = (id: string, text: string) => {
-    const el = $(id);
-    if (el) el.textContent = text;
-  };
-  set(
-    "recommendation",
-    r.score < 84
-      ? `Run a focused HF discharge follow-through pilot in ${r.county.label}. Start with ${r.inputs.monthly_hf_discharges} monthly discharges and test the weakest operating dimension first: ${r.weakest.label.toLowerCase()}.`
-      : `Use ${r.county.label} as a controlled follow-through pilot only if the goal is marginal lift, automation, or scale. The baseline workflow already appears structured.`,
-  );
-  set("memoWedge", r.pilotWedge);
-  set("successMeasures", SUCCESS_MEASURES);
-  set("buyerView", r.roleView.buyer);
-  set("riskPublicSupport", `${r.county.context} ${r.county.support}`);
-  set(
-    "guardrail",
-    "This public version creates a workflow hypothesis. It does not claim savings, avoidable readmissions, patient-level risk, or actual ROI without a contracted data feed.",
-  );
-
-  const dr = $("dataRequest");
-  if (dr) {
-    dr.innerHTML = auditPackage(r)
-      .pilot_data_request.map(
-        ({ category, fields }) => `<div class="data-row"><b>${category}</b><span>${fields}</span></div>`,
+  q.addEventListener("input", () => {
+    const term = q.value.trim().toLowerCase();
+    if (term.length < 3) {
+      results.innerHTML = "";
+      return;
+    }
+    const matches = index.filter((h) => h.name.toLowerCase().includes(term)).slice(0, 12);
+    results.innerHTML = matches
+      .map(
+        (h) =>
+          `<button class="result-item" type="button" data-id="${h.id}" data-state="${h.state}">
+            <b>${h.name}</b><span>${h.county ?? "?"} County, ${h.state}</span>
+          </button>`,
       )
       .join("");
-  }
-
-  const json = $("auditJson");
-  if (json) json.textContent = JSON.stringify(auditPackage(r), null, 2);
-}
-
-// ---------- Audience / view ----------
-
-function setAudience(audience: Audience) {
-  document.body.dataset.audience = audience;
-  ($("viewOperator") as HTMLButtonElement).setAttribute("aria-pressed", String(audience === "operator"));
-  ($("viewRiskOwner") as HTMLButtonElement).setAttribute("aria-pressed", String(audience === "risk_owner"));
-
-  const cta = $("primaryCta") as HTMLAnchorElement;
-  const footerCta = $("footerCta") as HTMLAnchorElement;
-  if (audience === "operator") {
-    cta.textContent = "Build my brief";
-    cta.setAttribute("href", "#audit-output");
-    footerCta.textContent = "Send this to your risk owner";
-    footerCta.setAttribute("href", "#audit-output");
-  } else {
-    cta.textContent = "Generate pilot brief";
-    cta.setAttribute("href", "#pilotBrief");
-    footerCta.textContent = "Run this on a real panel";
-    footerCta.setAttribute("href", PILOT_EMAIL);
-  }
-}
-
-// ---------- Role gate ----------
-
-function buildRoleGate() {
-  const wrap = $("roleOptions") as HTMLElement;
-  wrap.innerHTML = roleOptions
-    .map(
-      (r) => `
-      <button type="button" class="role-option" data-role="${r.value}">
-        <b>${r.label}</b>
-        <span>${roleBlurbs[r.value]}</span>
-      </button>`,
-    )
-    .join("");
-
-  wrap.querySelectorAll<HTMLButtonElement>(".role-option").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const role = btn.dataset.role as RoleId;
-      ($("role") as HTMLSelectElement).value = role;
-      setAudience(audienceForRole(role));
-      render();
-      ($("roleGate") as HTMLElement).hidden = true;
+    results.querySelectorAll<HTMLButtonElement>(".result-item").forEach((btn) => {
+      btn.addEventListener("click", () =>
+        selectHospital(btn.dataset.id!, btn.dataset.state!),
+      );
     });
   });
 }
 
-// ---------- Copy helpers ----------
+async function selectHospital(id: string, state: string) {
+  root.innerHTML = `<p class="lede" style="text-align:center">Loading ${state} hospitals…</p>`;
+  const shard: HospitalRecord[] = await fetch(`${BASE}data/states/${state}.json`).then((r) =>
+    r.json(),
+  );
+  renderVerdict(benchmarkHospital(id, shard), shard);
+}
+
+// ---------- Verdict ----------
+
+function fmtRatio(err: number | null): string {
+  return err === null ? "—" : err.toFixed(2);
+}
+
+function pctVsExpected(err: number): string {
+  const delta = Math.round((err - 1) * 100);
+  if (delta > 0) return `${delta}% more readmissions than expected`;
+  if (delta < 0) return `${Math.abs(delta)}% fewer readmissions than expected`;
+  return "right at the expected rate";
+}
+
+function rankSentence(c: ConditionBenchmark, state: string): string {
+  if (c.rank === null) return "";
+  const better = c.rank - 1;
+  const worse = c.peerCount - c.rank;
+  return `Ranked ${c.rank} of ${c.peerCount} in ${state} (1 = lowest). ` +
+    `${better} ${state} hospital${better === 1 ? "" : "s"} do better; ${worse} do worse.`;
+}
+
+function heroCondition(r: BenchmarkResult): ConditionBenchmark | null {
+  if (r.worst) return r.worst;
+  const hf = r.conditions.find((c) => c.condition === "HF" && !c.suppressed);
+  if (hf) return hf;
+  return r.conditions.find((c) => !c.suppressed) ?? null;
+}
+
+function renderVerdict(r: BenchmarkResult, shard: HospitalRecord[]) {
+  restartBtn.hidden = false;
+  const hero = heroCondition(r);
+  const penaltyBadge =
+    r.penalizedCount > 0
+      ? `<span class="badge penalty">⚠ Penalized on ${r.penalizedCount} of ${r.reportedCount} measured conditions</span>`
+      : r.reportedCount > 0
+        ? `<span class="badge ok">Not currently in penalty territory (${r.reportedCount} measured)</span>`
+        : `<span class="badge">CMS suppressed every measure for this hospital</span>`;
+
+  const heroHtml = hero
+    ? `<div class="hero">
+         <div class="ratio-big">
+           <strong style="color:${hero.penalized ? "var(--rose)" : "var(--green)"}">${fmtRatio(hero.excessRatio)}</strong>
+           <small>excess readmission ratio</small>
+         </div>
+         <div class="hero-copy">
+           <h3>${hero.label}: ${pctVsExpected(hero.excessRatio!)}</h3>
+           <p>${
+             hero.penalized
+               ? `An excess ratio above 1.00 means CMS pays you less — this is penalty territory.`
+               : `An excess ratio at or below 1.00 keeps you out of penalty territory for this condition.`
+           }</p>
+           <p class="peers">${rankSentence(hero, r.hospital.state)}</p>
+         </div>
+       </div>`
+    : "";
+
+  const rows = r.conditions
+    .map((c) => {
+      if (c.suppressed) {
+        return `<div class="cond">
+          <b>${c.label}</b>
+          <span class="num muted">—</span>
+          <span class="pill suppressed">CMS-suppressed</span>
+          <span class="muted">too few cases to report</span>
+          <span></span>
+        </div>`;
+      }
+      const pill = c.penalized
+        ? `<span class="pill penalty">Penalty</span>`
+        : `<span class="pill ok">OK</span>`;
+      return `<div class="cond">
+        <b>${c.label}</b>
+        <span class="num" style="color:${c.penalized ? "var(--rose)" : "var(--ink)"}">${fmtRatio(c.excessRatio)}</span>
+        ${pill}
+        <span class="muted">rank ${c.rank}/${c.peerCount} · state median ${fmtRatio(c.stateMedian)}</span>
+        <span></span>
+      </div>`;
+    })
+    .join("");
+
+  root.innerHTML = `
+    <section class="verdict">
+      <div class="verdict-top">
+        <div>
+          <h2>${r.hospital.name}</h2>
+          <div class="place">${r.hospital.county ?? "?"} County, ${r.hospital.state}</div>
+        </div>
+        ${penaltyBadge}
+      </div>
+
+      ${heroHtml}
+
+      <section class="panel">
+        <div class="section-head">
+          <div>
+            <h2 style="font-size:22px">All six HRRP conditions</h2>
+            <p>CMS measures 30-day readmissions on these six. Ratio above 1.00 = worse than expected for your case mix.</p>
+          </div>
+          <span class="tag">CMS published</span>
+        </div>
+        ${rows}
+      </section>
+
+      <section class="panel export">
+        <div class="section-head">
+          <div>
+            <h2 style="font-size:22px">One-pager for your leadership</h2>
+            <p>CMS's numbers, framed. Copy it into an email or print it — the case is the source, not your opinion.</p>
+          </div>
+          <div class="button-row">
+            <button class="button" type="button" id="copyOnePager">Copy</button>
+            <button class="button" type="button" id="printOnePager">Print</button>
+          </div>
+        </div>
+        <pre id="onePager">${onePager(r, shard)}</pre>
+      </section>
+
+      <p class="lede" style="text-align:center;margin-top:8px">
+        This is the public picture. The next step is running the same logic on your attributed panel —
+        <a href="mailto:joel@enduranthealthspan.com?subject=Readmission%20pilot%20—%20${encodeURIComponent(r.hospital.name)}" style="font-weight:800;text-decoration:none;color:var(--blue-deep)">talk to Endurant about a pilot</a>.
+      </p>
+    </section>`;
+
+  document
+    .getElementById("copyOnePager")!
+    .addEventListener("click", () => copyText(onePager(r, shard), "One-pager copied"));
+  document.getElementById("printOnePager")!.addEventListener("click", () => window.print());
+}
+
+function onePager(r: BenchmarkResult, shard: HospitalRecord[]): string {
+  const lines: string[] = [
+    `READMISSION REALITY CHECK — ${r.hospital.name}`,
+    `${r.hospital.county ?? "?"} County, ${r.hospital.state}`,
+    `Source: CMS Hospital Readmissions Reduction Program, ${manifest.hrrpPeriod.start}–${manifest.hrrpPeriod.end} (public, non-PHI).`,
+    ``,
+    r.penalizedCount > 0
+      ? `We are in penalty territory on ${r.penalizedCount} of ${r.reportedCount} measured conditions.`
+      : `We are not in penalty territory on any of the ${r.reportedCount} measured conditions.`,
+    ``,
+  ];
+  for (const c of r.conditions) {
+    if (c.suppressed) {
+      lines.push(`- ${c.label}: CMS-suppressed (too few cases to report).`);
+      continue;
+    }
+    const sp = statePenaltyCount(shard, c.condition);
+    lines.push(
+      `- ${c.label}: excess ratio ${fmtRatio(c.excessRatio)} (${pctVsExpected(c.excessRatio!)}). ` +
+        `${c.penalized ? "PENALTY." : "OK."} Rank ${c.rank} of ${c.peerCount} in ${r.hospital.state} ` +
+        `(state median ${fmtRatio(c.stateMedian)}; ${sp.penalized} of ${sp.reported} ${r.hospital.state} hospitals penalized on this condition).`,
+    );
+  }
+  if (r.worst) {
+    lines.push(
+      ``,
+      `Biggest gap vs. state peers: ${r.worst.label} — ${fmtRatio(r.worst.excessRatio)}, ` +
+        `${fmtRatio(r.worst.gapToMedian)} above the ${r.hospital.state} median. Start the follow-through program here.`,
+    );
+  }
+  lines.push(
+    ``,
+    `Note: excess readmission ratio is CMS's own risk-adjusted measure; >1.00 means more readmissions than expected for our case mix. This is public data, not a clinical or ROI claim.`,
+  );
+  return lines.join("\n");
+}
+
+// ---------- Toast / copy ----------
 
 function showToast(message: string) {
-  const toast = $("toast") as HTMLElement;
+  const toast = document.getElementById("toast")!;
   toast.textContent = message;
   toast.classList.add("show");
   window.clearTimeout((showToast as unknown as { t: number }).t);
   (showToast as unknown as { t: number }).t = window.setTimeout(
     () => toast.classList.remove("show"),
-    2400,
+    2200,
   );
 }
 
@@ -278,12 +295,12 @@ function copyText(text: string, message: string) {
   navigator.clipboard.writeText(text).then(
     () => showToast(message),
     () => {
-      const area = document.createElement("textarea");
-      area.value = text;
-      document.body.appendChild(area);
-      area.select();
+      const a = document.createElement("textarea");
+      a.value = text;
+      document.body.appendChild(a);
+      a.select();
       document.execCommand("copy");
-      area.remove();
+      a.remove();
       showToast(message);
     },
   );
@@ -291,24 +308,11 @@ function copyText(text: string, message: string) {
 
 // ---------- Init ----------
 
-function init() {
-  buildForm();
-  buildRoleGate();
-  setAudience("risk_owner");
+restartBtn.addEventListener("click", renderLanding);
 
-  document.getElementById("auditForm")!.addEventListener("change", render);
-  document.getElementById("auditForm")!.addEventListener("input", render);
-
-  $("viewOperator")!.addEventListener("click", () => setAudience("operator"));
-  $("viewRiskOwner")!.addEventListener("click", () => setAudience("risk_owner"));
-
-  const bind = (id: string, fn: () => void) => $(id)?.addEventListener("click", fn);
-  bind("copyMemo", () => copyText(memoText(current), "Pilot memo copied"));
-  bind("copyMemoOperator", () => copyText(memoText(current), "One-page brief copied"));
-  bind("copyJson", () => copyText(JSON.stringify(auditPackage(current), null, 2), "Audit JSON copied"));
-  bind("copyAgentPrompt", () => copyText(agentPrompt(current), "Agent prompt copied"));
-
-  render();
-}
-
-init();
+loadData()
+  .then(renderLanding)
+  .catch((e) => {
+    console.error(e);
+    root.innerHTML = `<p class="lede" style="text-align:center">Could not load the CMS data snapshot. ${String(e)}</p>`;
+  });
