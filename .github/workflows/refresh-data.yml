@@ -1,0 +1,35 @@
+name: Refresh CMS data snapshot
+
+# CMS HRRP updates roughly annually. Re-pull monthly and open a PR so the
+# data change is reviewable before it ships.
+on:
+  schedule:
+    - cron: "0 9 1 * *" # 09:00 UTC on the 1st of each month
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build:data
+      - run: npm test
+      - name: Open PR if the snapshot changed
+        uses: peter-evans/create-pull-request@v7
+        with:
+          commit-message: "Refresh CMS data snapshot"
+          title: "Refresh CMS data snapshot"
+          body: |
+            Automated monthly refresh of the CMS HRRP + Hospital General Info snapshot.
+            Review the diff under `public/data/` before merging.
+          branch: data/refresh
+          delete-branch: true
