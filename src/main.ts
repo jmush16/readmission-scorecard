@@ -21,7 +21,7 @@ declare global {
 // Web3Forms access key (public token tied to Joel's email). When empty, the
 // contact form falls back to a mailto so no lead is ever lost.
 // To enable in-app delivery: get a free key at web3forms.com and paste it here.
-const CONTACT_KEY = "";
+const CONTACT_KEY = "75f56baf-5462-4bc0-93e0-739ed3f15c72";
 const CONTACT_EMAIL = "joel@enduranthealthspan.com";
 
 const BASE = import.meta.env.BASE_URL;
