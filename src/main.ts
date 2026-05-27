@@ -8,6 +8,9 @@ import type {
   SnapshotManifest,
 } from "./lib/hrrp/types";
 import { benchmarkHospital, statePenaltyCount } from "./lib/hrrp/benchmark";
+import { researchPrompt, researchLinks } from "./lib/hrrp/research";
+import { interventionsFor, BILLING_NOTE, SOURCES } from "./lib/hrrp/playbook";
+import type { ConditionKey } from "./lib/hrrp/types";
 
 const BASE = import.meta.env.BASE_URL;
 const root = document.getElementById("root")!;
@@ -143,6 +146,7 @@ function heroCondition(r: BenchmarkResult): ConditionBenchmark | null {
 function renderVerdict(r: BenchmarkResult, shard: HospitalRecord[]) {
   restartBtn.hidden = false;
   const hero = heroCondition(r);
+  const targetCondition: ConditionKey = hero?.condition ?? "HF";
   const penaltyBadge =
     r.penalizedCount > 0
       ? `<span class="badge penalty">⚠ Penalized on ${r.penalizedCount} of ${r.reportedCount} measured conditions</span>`
@@ -229,6 +233,10 @@ function renderVerdict(r: BenchmarkResult, shard: HospitalRecord[]) {
         <pre id="onePager">${onePager(r, shard)}</pre>
       </section>
 
+      ${playbookPanel(targetCondition)}
+
+      ${researchPanel()}
+
       <p class="lede" style="text-align:center;margin-top:8px">
         This is the public picture. The next step is running the same logic on your attributed panel —
         <a href="mailto:joel@enduranthealthspan.com?subject=Readmission%20pilot%20—%20${encodeURIComponent(r.hospital.name)}" style="font-weight:800;text-decoration:none;color:var(--blue-deep)">talk to Endurant about a pilot</a>.
@@ -239,6 +247,63 @@ function renderVerdict(r: BenchmarkResult, shard: HospitalRecord[]) {
     .getElementById("copyOnePager")!
     .addEventListener("click", () => copyText(onePager(r, shard), "One-pager copied"));
   document.getElementById("printOnePager")!.addEventListener("click", () => window.print());
+
+  // AI research action — one preset prompt, usable in any agent.
+  const prompt = researchPrompt(r, manifest.hrrpPeriod);
+  const links = researchLinks(prompt);
+  document
+    .getElementById("copyResearch")!
+    .addEventListener("click", () =>
+      copyText(prompt, "Research prompt copied — paste into Claude Code, Codex, or any AI"),
+    );
+  (document.getElementById("openChatgpt") as HTMLAnchorElement).href = links.chatgpt;
+  (document.getElementById("openClaude") as HTMLAnchorElement).href = links.claude;
+  (document.getElementById("openPerplexity") as HTMLAnchorElement).href = links.perplexity;
+}
+
+function playbookPanel(condition: ConditionKey): string {
+  const items = interventionsFor(condition)
+    .map(
+      (i) => `<li><b>${i.title}</b><span>${i.detail}</span></li>`,
+    )
+    .join("");
+  return `
+    <section class="panel">
+      <div class="section-head">
+        <div>
+          <h2 style="font-size:22px">What the hospitals beating you do</h2>
+          <p>Evidence-based moves that cut 30-day readmissions — and the billing that makes the program pay for itself.</p>
+        </div>
+        <span class="tag">Start here</span>
+      </div>
+      <ul class="plain-list">${items}</ul>
+      <div class="memo-block" style="margin-top:18px;border-top:1px solid var(--line);padding-top:16px">
+        <h3 style="margin-bottom:6px">${BILLING_NOTE.title}</h3>
+        <p style="color:var(--muted);font-size:14px;margin:0 0 6px">${BILLING_NOTE.detail}</p>
+        <p class="provenance" style="margin:0">${BILLING_NOTE.caveat}</p>
+      </div>
+      <p class="provenance" style="margin-top:14px">${SOURCES}</p>
+    </section>`;
+}
+
+function researchPanel(): string {
+  return `
+    <section class="panel">
+      <div class="section-head">
+        <div>
+          <h2 style="font-size:22px">Get what this data can't show — with your own AI</h2>
+          <p>CMS data lags ~2 years. Run our preset research prompt, pre-loaded with this hospital's numbers, to surface the current penalty, what's changed since 2024, the 2026 rules, and an upgraded one-pager.</p>
+        </div>
+        <span class="tag">AI research</span>
+      </div>
+      <div class="button-row">
+        <button class="button primary" type="button" id="copyResearch">Copy research prompt</button>
+        <a class="button" id="openChatgpt" target="_blank" rel="noopener">Open in ChatGPT</a>
+        <a class="button" id="openClaude" target="_blank" rel="noopener">Open in Claude</a>
+        <a class="button" id="openPerplexity" target="_blank" rel="noopener">Open in Perplexity</a>
+      </div>
+      <p class="provenance" style="margin-top:12px">The copy button works in Claude Code, Codex, or any AI agent — it's a self-contained prompt with this hospital's CMS data built in.</p>
+    </section>`;
 }
 
 function onePager(r: BenchmarkResult, shard: HospitalRecord[]): string {

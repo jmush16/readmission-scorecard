@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { num, median, round } from "../src/lib/hrrp/normalize";
 import { benchmarkHospital, statePenaltyCount } from "../src/lib/hrrp/benchmark";
+import { researchPrompt } from "../src/lib/hrrp/research";
+import { interventionsFor } from "../src/lib/hrrp/playbook";
 import type { ConditionKey, ConditionMeasure, HospitalRecord } from "../src/lib/hrrp/types";
 
 describe("normalize", () => {
@@ -91,6 +93,34 @@ describe("benchmarkHospital", () => {
 
   it("throws for an unknown hospital", () => {
     expect(() => benchmarkHospital("999", shard)).toThrow();
+  });
+});
+
+describe("researchPrompt", () => {
+  const shard: HospitalRecord[] = [
+    hosp("1", "Best Hospital", 0.9),
+    hosp("2", "Worst Hospital", 1.3),
+  ];
+
+  it("embeds the real data and the honesty + recency instructions", () => {
+    const r = benchmarkHospital("2", shard);
+    const p = researchPrompt(r, { start: "07/01/2021", end: "06/30/2024" });
+    expect(p).toContain("Worst Hospital");
+    expect(p).toContain("CCN 2");
+    expect(p).toContain("1.30"); // the real ratio is carried in
+    expect(p).toContain("07/01/2021–06/30/2024");
+    expect(p).toMatch(/cite every external claim/i);
+    expect(p).toMatch(/never invent numbers/i);
+    expect(p).toMatch(/TEAM model/);
+    expect(p).toMatch(/99495/); // TCM billing
+  });
+});
+
+describe("interventionsFor", () => {
+  it("returns the core bundle plus condition-specific moves", () => {
+    const hf = interventionsFor("HF");
+    expect(hf.length).toBeGreaterThan(4);
+    expect(hf.some((i) => /weight|GDMT/i.test(i.title))).toBe(true);
   });
 });
 

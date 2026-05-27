@@ -10,7 +10,13 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { benchmarkHospital } from "../src/lib/hrrp/benchmark";
-import type { BenchmarkResult, HospitalIndexEntry, HospitalRecord } from "../src/lib/hrrp/types";
+import { researchPrompt } from "../src/lib/hrrp/research";
+import type {
+  BenchmarkResult,
+  HospitalIndexEntry,
+  HospitalRecord,
+  SnapshotManifest,
+} from "../src/lib/hrrp/types";
 
 const DATA = join(process.cwd(), "public", "data");
 
@@ -79,11 +85,20 @@ function printHuman(r: BenchmarkResult) {
   console.log("\nSource: CMS Hospital Readmissions Reduction Program (public, non-PHI).");
 }
 
+function loadManifest(): SnapshotManifest {
+  return JSON.parse(readFileSync(join(DATA, "manifest.json"), "utf8"));
+}
+
 function main() {
   const entry = findEntry();
   const result = benchmarkHospital(entry.id, loadState(entry.state));
-  if (process.argv.includes("--json")) console.log(JSON.stringify(result, null, 2));
-  else printHuman(result);
+  if (process.argv.includes("--research")) {
+    console.log(researchPrompt(result, loadManifest().hrrpPeriod));
+  } else if (process.argv.includes("--json")) {
+    console.log(JSON.stringify(result, null, 2));
+  } else {
+    printHuman(result);
+  }
 }
 
 main();
