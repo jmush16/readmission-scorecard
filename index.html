@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Heart Failure Follow-Up Readiness Audit</title>
+  <meta name="description" content="Stress-test a heart-failure discharge workflow before you fund or staff the next pilot. Non-PHI, public-data workflow diagnostic.">
+</head>
+<body>
+  <div class="app">
+    <!-- Onboarding role gate: routes the visitor to their view -->
+    <div class="role-gate" id="roleGate" role="dialog" aria-modal="true" aria-labelledby="gateTitle">
+      <div class="role-card">
+        <div class="eyebrow">Before we start</div>
+        <h2 id="gateTitle">Who is running this audit?</h2>
+        <p>We will tailor what you see. You can switch perspectives at any time from the top of the page.</p>
+        <div class="role-options" id="roleOptions"></div>
+      </div>
+    </div>
+
+    <header class="topbar">
+      <div class="tool-lockup" aria-label="Tool title">
+        <strong>Heart Failure Follow-Up Readiness Audit</strong>
+        <span>Stress-test a discharge workflow before you fund or staff the next pilot.</span>
+      </div>
+      <div class="top-actions">
+        <div class="view-toggle" role="group" aria-label="Choose your view">
+          <button type="button" id="viewOperator" aria-pressed="false">Operator</button>
+          <button type="button" id="viewRiskOwner" aria-pressed="true">Risk owner</button>
+        </div>
+        <a class="button" href="#audit">Start audit</a>
+        <a class="button primary" id="primaryCta" href="#audit-output">Generate brief</a>
+      </div>
+    </header>
+
+    <main class="shell">
+      <section class="intro" aria-labelledby="page-title">
+        <div class="intro-copy">
+          <div class="eyebrow">Care transitions workbench</div>
+          <h1 id="page-title">Can this discharge workflow catch risk before the patient comes back?</h1>
+          <p class="lede">
+            Answer a short operational audit. Get a plain-language failure chain, ownership gaps,
+            and a result your team can act on in the first 14 days after discharge.
+          </p>
+          <div class="promise-grid" aria-label="What this tool returns">
+            <div class="promise" data-view="operator">
+              <b>See the breakpoints</b>
+              <span>Where outreach, medication access, teach-back, and escalation will break in the first 14 days.</span>
+            </div>
+            <div class="promise" data-view="operator">
+              <b>Name the owner</b>
+              <span>Surface the unresolved promises and the moments no one currently owns.</span>
+            </div>
+            <div class="promise" data-view="operator">
+              <b>Make the case upward</b>
+              <span>Turn your daily reality into one page the person who owns the budget can act on.</span>
+            </div>
+            <div class="promise" data-view="risk_owner">
+              <b>Turn pain into a pilot</b>
+              <span>Convert the workflow gap into a scoped pilot hypothesis, not a vague dashboard wish list.</span>
+            </div>
+            <div class="promise" data-view="risk_owner">
+              <b>Know the data ask</b>
+              <span>See the minimum compliant data a contracted pilot would need to prove follow-through.</span>
+            </div>
+            <div class="promise" data-view="risk_owner">
+              <b>Stay honest</b>
+              <span>Public data frames the question; it never fabricates savings or patient-level ROI.</span>
+            </div>
+          </div>
+        </div>
+
+        <aside class="live-summary" aria-labelledby="summary-title">
+          <div class="summary-head">
+            <div>
+              <span>Live result</span>
+              <h2 id="summary-title">Readiness score</h2>
+            </div>
+            <div class="score-ring" id="scoreRing" aria-label="Readiness score">
+              <div class="score-ring-inner">
+                <div>
+                  <strong id="scoreValue">58</strong>
+                  <small>of 100</small>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="summary-body">
+            <div class="status-label" id="statusLabel">Pilot-worthy gap</div>
+            <h2 id="summaryHeadline">The workflow can find some risk, but it cannot prove follow-through.</h2>
+            <p id="summaryCopy">
+              The immediate gap is not clinical intent. It is whether anyone can see the plan failing early enough to intervene.
+            </p>
+            <ul class="summary-list">
+              <li><span>First break</span><strong id="firstBreak"></strong></li>
+              <li><span>Pilot wedge</span><strong id="pilotWedge"></strong></li>
+              <li><span>Proof target</span><strong id="proofTarget"></strong></li>
+            </ul>
+          </div>
+        </aside>
+      </section>
+
+      <section class="workspace" id="audit">
+        <form class="audit-form" id="auditForm" aria-labelledby="audit-title">
+          <div class="form-title">
+            <div>
+              <h2 id="audit-title">Workflow facts</h2>
+              <p>Use team-level facts only. No patient names, MRNs, notes, dates of birth, or messages.</p>
+            </div>
+            <span class="trust-note">No patient details</span>
+          </div>
+
+          <div class="field">
+            <label for="role">Who is using this audit?</label>
+            <select id="role"></select>
+          </div>
+
+          <div class="form-row">
+            <div class="field">
+              <label for="county">Public context</label>
+              <select id="county"></select>
+            </div>
+            <div class="field">
+              <label for="discharges">HF discharges / month</label>
+              <input id="discharges" type="number" min="10" max="5000" step="10" value="240">
+            </div>
+          </div>
+
+          <div class="field" id="prioritizationField">
+            <label id="prioritizationLabel"></label>
+            <div class="choice-grid" id="prioritizationChoices"></div>
+          </div>
+
+          <div id="selectFields"></div>
+        </form>
+
+        <div class="main-grid" id="auditOutput" aria-live="polite">
+          <section class="panel" aria-labelledby="dimensions-title">
+            <div class="section-head">
+              <div>
+                <h2 id="dimensions-title">What the audit sees</h2>
+                <p id="dimensionsLede">The score is not a quality judgment. It is a readiness signal for whether a team can see, own, and close follow-through work after discharge.</p>
+              </div>
+              <span class="tag">Live calculation</span>
+            </div>
+            <div class="dimension-grid" id="dimensions"></div>
+          </section>
+
+          <!-- OPERATOR: the 14-day failure map is the centerpiece -->
+          <section class="panel" data-view="operator" aria-labelledby="failure-title">
+            <div class="section-head">
+              <div>
+                <h2 id="failure-title">14-day failure map</h2>
+                <p>A discharge plan usually sounds complete on day 0. This is where it loses contact with real life.</p>
+              </div>
+              <span class="tag">Synthetic stress test</span>
+            </div>
+            <div class="failure-map" id="failureMap"></div>
+          </section>
+
+          <!-- OPERATOR: their reality + the upward handoff -->
+          <section class="panel" data-view="operator" aria-labelledby="operator-title">
+            <div class="section-head">
+              <div>
+                <h2 id="operator-title">Make the case upward</h2>
+                <p>This is the daily reality. The fastest way to fix it is to hand the person who owns the budget a clear, specific brief.</p>
+              </div>
+            </div>
+            <ul class="plain-list">
+              <li><b>What the front line is carrying</b><span id="operatorView"></span></li>
+              <li><b>What public data can frame</b><span id="operatorPublicSupport"></span></li>
+            </ul>
+            <div class="button-row" style="margin-top:18px">
+              <button class="button primary" type="button" id="copyMemoOperator">Copy the one-page brief</button>
+              <a class="button" id="shareUpwardCta" href="#">Send to my risk owner</a>
+            </div>
+          </section>
+
+          <!-- RISK OWNER: the pilot brief -->
+          <section class="memo" data-view="risk_owner" id="pilotBrief" aria-labelledby="memo-title">
+            <div class="memo-head">
+              <div>
+                <h2 id="memo-title">Pilot brief</h2>
+                <p>Clear enough for operators, specific enough for the budget owner.</p>
+              </div>
+              <button class="button primary" type="button" id="copyMemo">Copy memo</button>
+            </div>
+            <div class="memo-body">
+              <div class="memo-column">
+                <div class="memo-block">
+                  <h3>Recommendation</h3>
+                  <p id="recommendation"></p>
+                </div>
+                <div class="memo-block">
+                  <h3>Best pilot wedge</h3>
+                  <p id="memoWedge"></p>
+                </div>
+                <div class="memo-block">
+                  <h3>Success measures</h3>
+                  <p id="successMeasures"></p>
+                </div>
+                <div class="memo-block">
+                  <h3>Who feels it vs. who owns it</h3>
+                  <p id="buyerView"></p>
+                </div>
+              </div>
+              <div class="memo-column">
+                <div class="memo-block">
+                  <h3>Minimum data request for a contracted pilot</h3>
+                  <div class="data-table" id="dataRequest"></div>
+                </div>
+                <div class="memo-block">
+                  <h3>What public data can and cannot support</h3>
+                  <p id="riskPublicSupport"></p>
+                </div>
+                <div class="memo-block">
+                  <h3>Credibility guardrail</h3>
+                  <p id="guardrail"></p>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- RISK OWNER: secondary 14-day detail, collapsed -->
+          <section class="technical" data-view="risk_owner" aria-label="14-day operational detail">
+            <details>
+              <summary>
+                <span>
+                  <strong>14-day operational detail</strong>
+                  <span>How the gap plays out on the front line, day by day.</span>
+                </span>
+                <span class="chevron">+</span>
+              </summary>
+              <div class="technical-body">
+                <div class="failure-map" id="failureMapSecondary"></div>
+              </div>
+            </details>
+          </section>
+
+          <!-- RISK OWNER / analyst: export -->
+          <section class="technical" data-view="risk_owner" aria-labelledby="technical-title">
+            <details>
+              <summary>
+                <span>
+                  <strong id="technical-title">Export audit package</strong>
+                  <span>Optional JSON for analysts, internal agents, or a coding agent. This is not the main experience.</span>
+                </span>
+                <span class="chevron">+</span>
+              </summary>
+              <div class="technical-body">
+                <p class="lede" style="margin: 0; font-size: 14px;">
+                  Captures inputs, scores, failure chain, pilot hypothesis, data request, and caveats so a technical
+                  team or AI agent can reproduce the audit without PHI.
+                </p>
+                <div class="codebox" id="auditJson" aria-label="Audit package JSON"></div>
+                <div class="button-row">
+                  <button class="button" type="button" id="copyJson">Copy JSON</button>
+                  <button class="button" type="button" id="copyAgentPrompt">Copy agent prompt</button>
+                </div>
+              </div>
+            </details>
+          </section>
+        </div>
+      </section>
+
+      <footer class="footer">
+        <span>Built as a public workflow prototype. Use operational facts only; bring real panel data only under a compliant pilot agreement.</span>
+        <a id="footerCta" href="mailto:joel@enduranthealthspan.com?subject=HF%20follow-up%20readiness%20pilot">Run this on a real panel</a>
+      </footer>
+    </main>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
