@@ -333,3 +333,168 @@
     justify-self: start;
   }
 }
+
+/* ---------- Recency + coverage layer ---------- */
+.recency-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 18px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 8px 16px;
+  background: #f4fbff;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.recency-strip .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--cyan);
+}
+
+.recency-strip b {
+  font-weight: 850;
+}
+
+.recency-strip .asof {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.asof-chip {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: #f1f4f8;
+  color: var(--quiet);
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.lag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  padding: 4px 10px;
+  background: #fff7e8;
+  color: #9a5b0f;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.stars {
+  color: var(--amber);
+  letter-spacing: 2px;
+  font-size: 40px;
+  line-height: 1;
+}
+
+.burden {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 20px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--rose);
+  border-radius: var(--radius);
+  padding: 22px 24px;
+  background: #fff7f6;
+}
+
+.burden .big {
+  font-size: 44px;
+  font-weight: 850;
+  line-height: 1;
+  color: var(--rose);
+}
+
+.burden p {
+  margin: 0;
+  color: #5a4a48;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.recency-list {
+  display: grid;
+  gap: 0;
+}
+
+.recency-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) 90px minmax(0, 1.3fr) auto;
+  gap: 12px;
+  align-items: center;
+  border-top: 1px solid var(--line);
+  padding: 12px 0;
+  font-size: 14px;
+}
+
+.recency-row:first-child {
+  border-top: 0;
+}
+
+.recency-row b {
+  color: var(--ink);
+}
+
+.recency-row .num {
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+}
+
+/* ---------- Contact modal ---------- */
+.modal-field {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 14px;
+  text-align: left;
+}
+
+.modal-field label {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--ink);
+}
+
+.modal-field input,
+.modal-field textarea {
+  width: 100%;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.modal-field textarea {
+  min-height: 84px;
+  resize: vertical;
+}
+
+.modal-close {
+  position: absolute;
+  top: 16px;
+  right: 18px;
+  border: 0;
+  background: transparent;
+  font-size: 22px;
+  color: var(--muted);
+  line-height: 1;
+}
+
+.role-card.contact {
+  position: relative;
+  max-width: 460px;
+}
+
+.hp {
+  position: absolute;
+  left: -9999px;
+}

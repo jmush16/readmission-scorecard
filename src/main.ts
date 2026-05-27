@@ -1,16 +1,28 @@
 import "./styles.css";
 import "./benchmark.css";
 import type {
-  BenchmarkResult,
-  ConditionBenchmark,
+  ConditionKey,
   HospitalIndexEntry,
+  HospitalProfile,
   HospitalRecord,
   SnapshotManifest,
 } from "./lib/hrrp/types";
-import { benchmarkHospital, statePenaltyCount } from "./lib/hrrp/benchmark";
+import { buildProfile } from "./lib/hrrp/profile";
+import { statePenaltyCount } from "./lib/hrrp/benchmark";
 import { researchPrompt, researchLinks } from "./lib/hrrp/research";
 import { interventionsFor, BILLING_NOTE, SOURCES } from "./lib/hrrp/playbook";
-import type { ConditionKey } from "./lib/hrrp/types";
+
+declare global {
+  interface Window {
+    posthog?: { capture?: (event: string, props?: Record<string, unknown>) => void };
+  }
+}
+
+// Web3Forms access key (public token tied to Joel's email). When empty, the
+// contact form falls back to a mailto so no lead is ever lost.
+// To enable in-app delivery: get a free key at web3forms.com and paste it here.
+const CONTACT_KEY = "";
+const CONTACT_EMAIL = "joel@enduranthealthspan.com";
 
 const BASE = import.meta.env.BASE_URL;
 const root = document.getElementById("root")!;
@@ -18,6 +30,7 @@ const restartBtn = document.getElementById("restart") as HTMLButtonElement;
 
 let index: HospitalIndexEntry[] = [];
 let manifest: SnapshotManifest;
+let currentProfile: HospitalProfile | null = null;
 
 async function loadData() {
   const [m, idx] = await Promise.all([
@@ -26,10 +39,10 @@ async function loadData() {
   ]);
   manifest = m;
   index = idx;
-  const period = `${manifest.hrrpPeriod.start}–${manifest.hrrpPeriod.end}`;
   document.getElementById("provenance")!.textContent =
-    `Source: CMS Hospital Readmissions Reduction Program (dataset ${manifest.sources.hrrp}), ` +
-    `period ${period}. Public, non-PHI. ${manifest.counts.hospitals.toLocaleString()} hospitals.`;
+    `Sources: CMS Hospital Readmissions Reduction Program (${manifest.sources.hrrp}), ` +
+    `Unplanned Hospital Visits (${manifest.sources.unplanned}), and Hospital General Information ` +
+    `(${manifest.sources.hospitals}). Public, non-PHI. ${manifest.counts.hospitals.toLocaleString()} hospitals.`;
 }
 
 // ---------- Landing ----------
@@ -39,10 +52,10 @@ function renderLanding() {
   root.innerHTML = `
     <section class="landing">
       <div class="eyebrow" style="justify-content:center">Care transitions intelligence</div>
-      <h1>Is your hospital being penalized for readmissions — and how do you compare?</h1>
-      <p class="lede">CMS publishes every hospital's 30-day readmission performance, but as 18,000 raw rows
-      with no ranking. We assemble it: your numbers, your penalty status, and where you stand against the
-      hospitals next to you.</p>
+      <h1>How are your readmissions really doing — and how do you compare?</h1>
+      <p class="lede">CMS publishes your hospital's readmission performance across dozens of measures, but
+      scattered and unranked. We assemble it: your freshest rates, how many of your patients come back, your
+      penalty exposure, and where you stand against the hospitals next to you.</p>
       <div class="doors">
         <button class="door" type="button" id="doorOperator">
           <span class="verb">Benchmark my hospital</span>
@@ -95,130 +108,192 @@ function renderSearch() {
       .map(
         (h) =>
           `<button class="result-item" type="button" data-id="${h.id}" data-state="${h.state}">
-            <b>${h.name}</b><span>${h.county ?? "?"} County, ${h.state}</span>
+            <b>${h.name}</b><span>${h.county ? `${h.county} County, ` : ""}${h.state}</span>
           </button>`,
       )
       .join("");
     results.querySelectorAll<HTMLButtonElement>(".result-item").forEach((btn) => {
-      btn.addEventListener("click", () =>
-        selectHospital(btn.dataset.id!, btn.dataset.state!),
-      );
+      btn.addEventListener("click", () => selectHospital(btn.dataset.id!, btn.dataset.state!));
     });
   });
 }
 
 async function selectHospital(id: string, state: string) {
   root.innerHTML = `<p class="lede" style="text-align:center">Loading ${state} hospitals…</p>`;
-  const shard: HospitalRecord[] = await fetch(`${BASE}data/states/${state}.json`).then((r) =>
-    r.json(),
-  );
-  renderVerdict(benchmarkHospital(id, shard), shard);
+  const shard: HospitalRecord[] = await fetch(`${BASE}data/states/${state}.json`).then((r) => r.json());
+  currentProfile = buildProfile(id, shard);
+  renderProfile(currentProfile, shard);
+  window.posthog?.capture?.("hospital_benchmarked", { state, tier: currentProfile.tier });
 }
 
-// ---------- Verdict ----------
+// ---------- Profile / verdict ----------
 
-function fmtRatio(err: number | null): string {
-  return err === null ? "—" : err.toFixed(2);
+function worseColor(worse: boolean | null): string {
+  return worse === true ? "var(--rose)" : worse === false ? "var(--green)" : "var(--ink)";
 }
 
-function pctVsExpected(err: number): string {
-  const delta = Math.round((err - 1) * 100);
-  if (delta > 0) return `${delta}% more readmissions than expected`;
-  if (delta < 0) return `${Math.abs(delta)}% fewer readmissions than expected`;
-  return "right at the expected rate";
+function heroHtml(p: HospitalProfile, shard: HospitalRecord[]): string {
+  const sp = statePenaltyCount(shard, "HF");
+  const pervasive =
+    sp.reported > 0
+      ? `<p class="peers">In ${p.hospital.state}, <b>${sp.penalized} of ${sp.reported}</b> hospitals are penalized by CMS for heart-failure readmissions — you're not alone in this, but the benchmark is unforgiving.</p>`
+      : "";
+
+  if (p.headline.kind === "rate") {
+    return `<div class="hero">
+      <div class="ratio-big">
+        <strong style="color:${worseColor(p.headline.worse)}">${p.headline.value}</strong>
+        <small>${p.headline.asOf ?? ""}</small>
+      </div>
+      <div class="hero-copy">
+        <h3>${p.headline.label}${p.headline.comparedToNational ? ` — ${p.headline.comparedToNational}` : ""}</h3>
+        <p>This is the freshest readmission read CMS publishes for you${
+          p.headline.worse ? ", and it's running worse than the national rate" : ""
+        }. The penalty below is the lagged audit; this is closer to where you are now.</p>
+        ${pervasive}
+      </div>
+    </div>`;
+  }
+  if (p.headline.kind === "rating") {
+    const n = p.rating ?? 0;
+    return `<div class="hero">
+      <div class="ratio-big">
+        <div class="stars">${"★".repeat(n)}${"☆".repeat(5 - n)}</div>
+        <small>CMS overall rating</small>
+      </div>
+      <div class="hero-copy">
+        <h3>${p.headline.value}</h3>
+        <p>CMS doesn't publish enough readmission cases to score this hospital on the penalty program, but it
+        does publish an overall quality rating. Use the measures below and your state's picture to find the gap.</p>
+        ${pervasive}
+      </div>
+    </div>`;
+  }
+  // descriptor
+  return `<div class="hero" style="grid-template-columns:1fr">
+    <div class="hero-copy">
+      <h3>${p.headline.label}</h3>
+      <p>CMS publishes few comparative scores for this facility — typical for small, critical-access, or
+      specialty hospitals below the reporting threshold. That's not a clean bill of health; the public benchmark
+      can't see you. Use your state's picture below and the AI research action to pull your current standing.</p>
+      ${pervasive}
+    </div>
+  </div>`;
 }
 
-function rankSentence(c: ConditionBenchmark, state: string): string {
-  if (c.rank === null) return "";
-  const better = c.rank - 1;
-  const worse = c.peerCount - c.rank;
-  return `Ranked ${c.rank} of ${c.peerCount} in ${state} (1 = lowest). ` +
-    `${better} ${state} hospital${better === 1 ? "" : "s"} do better; ${worse} do worse.`;
+function burdenHtml(p: HospitalProfile): string {
+  if (!p.burden) return "";
+  const denom = p.burden.denominator;
+  return `<div class="burden">
+    <div class="big">≈ ${p.burden.returned.toLocaleString()}</div>
+    <p>That's roughly how many ${p.burden.label.toLowerCase()} patients came back to the hospital within 30 days${
+      denom ? ` — out of ${denom.toLocaleString()} CMS counted` : ""
+    } (${p.burden.asOf}). Every one is a patient your team did everything for, who still ended up back in a bed.</p>
+  </div>`;
 }
 
-function heroCondition(r: BenchmarkResult): ConditionBenchmark | null {
-  if (r.worst) return r.worst;
-  const hf = r.conditions.find((c) => c.condition === "HF" && !c.suppressed);
-  if (hf) return hf;
-  return r.conditions.find((c) => !c.suppressed) ?? null;
+function recencyStrip(p: HospitalProfile): string {
+  // Lead with the headline readmission measure (meaningful + recent), not the
+  // literally-newest niche measure.
+  if (p.headline.kind !== "rate" || !p.headline.asOf) return "";
+  return `<div class="recency-strip">
+    <span class="dot"></span>
+    <span>Freshest read: <b>${p.headline.label} ${p.headline.value}</b>${
+      p.headline.comparedToNational ? ` · ${p.headline.comparedToNational}` : ""
+    }</span>
+    <span class="asof">as of ${p.headline.asOf}</span>
+  </div>`;
 }
 
-function renderVerdict(r: BenchmarkResult, shard: HospitalRecord[]) {
-  restartBtn.hidden = false;
-  const hero = heroCondition(r);
-  const targetCondition: ConditionKey = hero?.condition ?? "HF";
-  const penaltyBadge =
-    r.penalizedCount > 0
-      ? `<span class="badge penalty">⚠ Penalized on ${r.penalizedCount} of ${r.reportedCount} measured conditions</span>`
-      : r.reportedCount > 0
-        ? `<span class="badge ok">Not currently in penalty territory (${r.reportedCount} measured)</span>`
-        : `<span class="badge">CMS suppressed every measure for this hospital</span>`;
-
-  const heroHtml =
-    hero
-      ? `<div class="hero">
-         <div class="ratio-big">
-           <strong style="color:${hero.penalized ? "var(--rose)" : "var(--green)"}">${fmtRatio(hero.excessRatio)}</strong>
-           <small>excess readmission ratio</small>
-         </div>
-         <div class="hero-copy">
-           <h3>${hero.label}: ${pctVsExpected(hero.excessRatio!)}</h3>
-           <p>${
-             hero.penalized
-               ? `An excess ratio above 1.00 means CMS pays you less — this is penalty territory.`
-               : `An excess ratio at or below 1.00 keeps you out of penalty territory for this condition.`
-           }</p>
-           <p class="peers">${rankSentence(hero, r.hospital.state)}</p>
-         </div>
-       </div>`
-      : limitedDataCard(r, shard);
-
-  const rows = r.conditions
+function auditBlock(p: HospitalProfile): string {
+  const b = p.benchmark;
+  if (b.reportedCount === 0) {
+    return `<section class="panel">
+      <div class="section-head">
+        <div>
+          <h2 style="font-size:22px">CMS penalty program (HRRP)</h2>
+          <p>HRRP hasn't scored this hospital — typical for smaller or specialty facilities. The fresher measures above are the read you can act on.</p>
+        </div>
+        <span class="lag-chip">⏳ ~2-yr lag by law</span>
+      </div>
+    </section>`;
+  }
+  const rows = b.conditions
     .map((c) => {
       if (c.suppressed) {
-        return `<div class="cond">
-          <b>${c.label}</b>
-          <span class="num muted">—</span>
-          <span class="pill suppressed">CMS-suppressed</span>
-          <span class="muted">too few cases to report</span>
-          <span></span>
-        </div>`;
+        return `<div class="cond"><b>${c.label}</b><span class="num muted">—</span>
+          <span class="pill suppressed">CMS-suppressed</span><span class="muted">too few cases</span><span></span></div>`;
       }
-      const pill = c.penalized
-        ? `<span class="pill penalty">Penalty</span>`
-        : `<span class="pill ok">OK</span>`;
-      return `<div class="cond">
-        <b>${c.label}</b>
-        <span class="num" style="color:${c.penalized ? "var(--rose)" : "var(--ink)"}">${fmtRatio(c.excessRatio)}</span>
-        ${pill}
-        <span class="muted">rank ${c.rank}/${c.peerCount} · state median ${fmtRatio(c.stateMedian)}</span>
-        <span></span>
-      </div>`;
+      const pill = c.penalized ? `<span class="pill penalty">Penalty</span>` : `<span class="pill ok">OK</span>`;
+      return `<div class="cond"><b>${c.label}</b>
+        <span class="num" style="color:${c.penalized ? "var(--rose)" : "var(--ink)"}">${c.excessRatio?.toFixed(2)}</span>
+        ${pill}<span class="muted">rank ${c.rank}/${c.peerCount} · median ${c.stateMedian?.toFixed(2)}</span><span></span></div>`;
     })
     .join("");
+  return `<section class="panel">
+    <div class="section-head">
+      <div>
+        <h2 style="font-size:22px">The penalty: HRRP excess-readmission ratios</h2>
+        <p>This is the regulatory proof — what CMS docks your Medicare payments on. Ratio above 1.00 = worse than expected for your case mix.</p>
+      </div>
+      <span class="lag-chip">⏳ CMS penalty cycle — ~2-yr lag by law</span>
+    </div>
+    ${rows}
+    <p class="provenance" style="margin-top:12px">Penalized on ${b.penalizedCount} of ${b.reportedCount} measured conditions. Period ${manifest.hrrpPeriod.start}–${manifest.hrrpPeriod.end}.</p>
+  </section>`;
+}
+
+function recencyPanel(p: HospitalProfile): string {
+  if (p.recency.length === 0) return "";
+  const rows = p.recency
+    .map(
+      (r) => `<div class="recency-row">
+        <b>${r.label}</b>
+        <span class="num" style="color:${worseColor(r.worse)}">${r.value}</span>
+        <span class="muted">${r.comparedToNational ?? ""}</span>
+        <span class="asof-chip">as of ${r.asOf}</span>
+      </div>`,
+    )
+    .join("");
+  return `<section class="panel">
+    <div class="section-head">
+      <div>
+        <h2 style="font-size:22px">Your current readmission measures</h2>
+        <p>The fresher CMS measures, each with its own measurement window. Newer than the penalty cycle.</p>
+      </div>
+      <span class="tag">CMS · latest</span>
+    </div>
+    <div class="recency-list">${rows}</div>
+  </section>`;
+}
+
+function renderProfile(p: HospitalProfile, shard: HospitalRecord[]) {
+  restartBtn.hidden = false;
+  const targetCondition: ConditionKey = p.benchmark.worst?.condition ?? "HF";
+  const badge =
+    p.benchmark.penalizedCount > 0
+      ? `<span class="badge penalty">⚠ Penalized on ${p.benchmark.penalizedCount} of ${p.benchmark.reportedCount} conditions</span>`
+      : p.headline.worse
+        ? `<span class="badge penalty">Running worse than the national rate</span>`
+        : `<span class="badge ok">Holding at or better than national</span>`;
 
   root.innerHTML = `
     <section class="verdict">
+      ${recencyStrip(p)}
       <div class="verdict-top">
         <div>
-          <h2>${r.hospital.name}</h2>
-          <div class="place">${r.hospital.county ? `${r.hospital.county} County, ` : ""}${r.hospital.state}</div>
+          <h2>${p.hospital.name}</h2>
+          <div class="place">${p.hospital.county ? `${p.hospital.county} County, ` : ""}${p.hospital.state}</div>
         </div>
-        ${penaltyBadge}
+        ${badge}
       </div>
 
-      ${heroHtml}
-
-      <section class="panel">
-        <div class="section-head">
-          <div>
-            <h2 style="font-size:22px">All six HRRP conditions</h2>
-            <p>CMS measures 30-day readmissions on these six. Ratio above 1.00 = worse than expected for your case mix.</p>
-          </div>
-          <span class="tag">CMS published</span>
-        </div>
-        ${rows}
-      </section>
+      ${heroHtml(p, shard)}
+      ${burdenHtml(p)}
+      ${recencyPanel(p)}
+      ${auditBlock(p)}
+      ${playbookPanel(targetCondition)}
+      ${researchPanel()}
 
       <section class="panel export">
         <div class="section-head">
@@ -231,74 +306,31 @@ function renderVerdict(r: BenchmarkResult, shard: HospitalRecord[]) {
             <button class="button" type="button" id="printOnePager">Print</button>
           </div>
         </div>
-        <pre id="onePager">${onePager(r, shard)}</pre>
+        <pre id="onePager">${onePager(p, shard)}</pre>
       </section>
 
-      ${playbookPanel(targetCondition)}
-
-      ${researchPanel()}
-
-      <p class="lede" style="text-align:center;margin-top:8px">
-        This is the public picture. The next step is running the same logic on your attributed panel —
-        <a href="mailto:joel@enduranthealthspan.com?subject=Readmission%20pilot%20—%20${encodeURIComponent(r.hospital.name)}" style="font-weight:800;text-decoration:none;color:var(--blue-deep)">talk to Endurant about a pilot</a>.
-      </p>
+      <div style="text-align:center;margin-top:8px">
+        <button class="button primary" type="button" id="contactBtn" style="min-height:48px;padding:12px 28px">Talk to Endurant about a pilot</button>
+        <p class="provenance" style="margin-top:8px">Run this same logic on your attributed panel.</p>
+      </div>
     </section>`;
 
-  document
-    .getElementById("copyOnePager")!
-    .addEventListener("click", () => copyText(onePager(r, shard), "One-pager copied"));
+  document.getElementById("copyOnePager")!.addEventListener("click", () => copyText(onePager(p, shard), "One-pager copied"));
   document.getElementById("printOnePager")!.addEventListener("click", () => window.print());
+  document.getElementById("contactBtn")!.addEventListener("click", openContactModal);
 
-  // AI research action — one preset prompt, usable in any agent.
-  const prompt = researchPrompt(r, manifest.hrrpPeriod);
+  const prompt = researchPrompt(p.benchmark, manifest.hrrpPeriod);
   const links = researchLinks(prompt);
   document
     .getElementById("copyResearch")!
-    .addEventListener("click", () =>
-      copyText(prompt, "Research prompt copied — paste into Claude Code, Codex, or any AI"),
-    );
+    .addEventListener("click", () => copyText(prompt, "Research prompt copied — paste into Claude Code, Codex, or any AI"));
   (document.getElementById("openChatgpt") as HTMLAnchorElement).href = links.chatgpt;
   (document.getElementById("openClaude") as HTMLAnchorElement).href = links.claude;
   (document.getElementById("openPerplexity") as HTMLAnchorElement).href = links.perplexity;
 }
 
-function limitedDataCard(r: BenchmarkResult, shard: HospitalRecord[]): string {
-  const st = r.hospital.state;
-  // Give them the state picture even though their own numbers are suppressed.
-  const pairs: [ConditionKey, string][] = [
-    ["HF", "heart failure"],
-    ["COPD", "COPD"],
-    ["PN", "pneumonia"],
-  ];
-  const context = pairs
-    .map(([cond, label]) => {
-      const sp = statePenaltyCount(shard, cond);
-      if (sp.reported === 0) return "";
-      return `<li><b>${sp.penalized} of ${sp.reported}</b><span>${st} hospitals are penalized on ${label}</span></li>`;
-    })
-    .filter(Boolean)
-    .join("");
-
-  return `<div class="hero" style="grid-template-columns:1fr">
-    <div class="hero-copy">
-      <h3>CMS doesn't publish readmission numbers for this hospital</h3>
-      <p>Every HRRP measure here is suppressed — almost always because the hospital is small,
-      critical-access, or specialty, with too few cases for CMS to report without risking patient privacy.
-      That's not a clean bill of health; it means the public benchmark can't see you.</p>
-      <p class="peers">Two ways to still get a real read: see how your state performs (below), and run the
-      AI research action to pull your hospital's <b>current</b> standing from CMS Care Compare and state
-      sources, which cover smaller facilities the HRRP file doesn't.</p>
-      ${context ? `<ul class="summary-list" style="margin-top:14px">${context}</ul>` : ""}
-    </div>
-  </div>`;
-}
-
 function playbookPanel(condition: ConditionKey): string {
-  const items = interventionsFor(condition)
-    .map(
-      (i) => `<li><b>${i.title}</b><span>${i.detail}</span></li>`,
-    )
-    .join("");
+  const items = interventionsFor(condition).map((i) => `<li><b>${i.title}</b><span>${i.detail}</span></li>`).join("");
   return `
     <section class="panel">
       <div class="section-head">
@@ -323,10 +355,10 @@ function researchPanel(): string {
     <section class="panel">
       <div class="section-head">
         <div>
-          <h2 style="font-size:22px">Get what this data can't show — with your own AI</h2>
-          <p>CMS data lags ~2 years. Run our preset research prompt, pre-loaded with this hospital's numbers, to surface the current penalty, what's changed since 2024, the 2026 rules, and an upgraded one-pager.</p>
+          <h2 style="font-size:22px">Research with AI</h2>
+          <p>Go deeper and get the very latest. Run our preset prompt — pre-loaded with this hospital's numbers — to pull current performance, what's changed recently, the 2026 rules, and an upgraded one-pager.</p>
         </div>
-        <span class="tag">AI research</span>
+        <span class="tag">AI · latest</span>
       </div>
       <div class="button-row">
         <button class="button primary" type="button" id="copyResearch">Copy research prompt</button>
@@ -334,45 +366,129 @@ function researchPanel(): string {
         <a class="button" id="openClaude" target="_blank" rel="noopener">Open in Claude</a>
         <a class="button" id="openPerplexity" target="_blank" rel="noopener">Open in Perplexity</a>
       </div>
-      <p class="provenance" style="margin-top:12px">The copy button works in Claude Code, Codex, or any AI agent — it's a self-contained prompt with this hospital's CMS data built in.</p>
+      <p class="provenance" style="margin-top:12px">The copy button works in Claude Code, Codex, or any AI agent — a self-contained prompt with this hospital's CMS data built in.</p>
     </section>`;
 }
 
-function onePager(r: BenchmarkResult, shard: HospitalRecord[]): string {
+function onePager(p: HospitalProfile, shard: HospitalRecord[]): string {
   const lines: string[] = [
-    `READMISSION REALITY CHECK — ${r.hospital.name}`,
-    `${r.hospital.county ?? "?"} County, ${r.hospital.state}`,
-    `Source: CMS Hospital Readmissions Reduction Program, ${manifest.hrrpPeriod.start}–${manifest.hrrpPeriod.end} (public, non-PHI).`,
-    ``,
-    r.penalizedCount > 0
-      ? `We are in penalty territory on ${r.penalizedCount} of ${r.reportedCount} measured conditions.`
-      : `We are not in penalty territory on any of the ${r.reportedCount} measured conditions.`,
+    `READMISSION REALITY CHECK — ${p.hospital.name}`,
+    `${p.hospital.county ? `${p.hospital.county} County, ` : ""}${p.hospital.state}`,
+    `Source: CMS public data (HRRP, Unplanned Hospital Visits, Hospital General Information). Non-PHI.`,
     ``,
   ];
-  for (const c of r.conditions) {
-    if (c.suppressed) {
-      lines.push(`- ${c.label}: CMS-suppressed (too few cases to report).`);
-      continue;
+  if (p.headline.kind === "rate") {
+    lines.push(`Freshest read — ${p.headline.label}: ${p.headline.value}${p.headline.comparedToNational ? ` (${p.headline.comparedToNational})` : ""}, as of ${p.headline.asOf}.`);
+  } else if (p.headline.kind === "rating") {
+    lines.push(`CMS overall rating: ${p.headline.value}.`);
+  }
+  if (p.burden) {
+    lines.push(`Burden: ≈ ${p.burden.returned.toLocaleString()} ${p.burden.label.toLowerCase()} patients came back within 30 days (${p.burden.asOf}).`);
+  }
+  if (p.recency.length) {
+    lines.push(``, `Current measures:`);
+    for (const r of p.recency) lines.push(`- ${r.label}: ${r.value}${r.comparedToNational ? ` (${r.comparedToNational})` : ""}, as of ${r.asOf}.`);
+  }
+  const b = p.benchmark;
+  if (b.reportedCount > 0) {
+    lines.push(``, `Penalty (HRRP, ${manifest.hrrpPeriod.start}–${manifest.hrrpPeriod.end}, lags ~2yr by law):`);
+    lines.push(`Penalized on ${b.penalizedCount} of ${b.reportedCount} conditions.`);
+    for (const c of b.conditions) {
+      if (c.suppressed) continue;
+      const sp = statePenaltyCount(shard, c.condition);
+      lines.push(`- ${c.label}: excess ratio ${c.excessRatio?.toFixed(2)} ${c.penalized ? "(PENALTY)" : "(OK)"}, rank ${c.rank}/${c.peerCount} in ${p.hospital.state} (${sp.penalized}/${sp.reported} state hospitals penalized).`);
     }
-    const sp = statePenaltyCount(shard, c.condition);
-    lines.push(
-      `- ${c.label}: excess ratio ${fmtRatio(c.excessRatio)} (${pctVsExpected(c.excessRatio!)}). ` +
-        `${c.penalized ? "PENALTY." : "OK."} Rank ${c.rank} of ${c.peerCount} in ${r.hospital.state} ` +
-        `(state median ${fmtRatio(c.stateMedian)}; ${sp.penalized} of ${sp.reported} ${r.hospital.state} hospitals penalized on this condition).`,
-    );
   }
-  if (r.worst) {
-    lines.push(
-      ``,
-      `Biggest gap vs. state peers: ${r.worst.label} — ${fmtRatio(r.worst.excessRatio)}, ` +
-        `${fmtRatio(r.worst.gapToMedian)} above the ${r.hospital.state} median. Start the follow-through program here.`,
-    );
-  }
-  lines.push(
-    ``,
-    `Note: excess readmission ratio is CMS's own risk-adjusted measure; >1.00 means more readmissions than expected for our case mix. This is public data, not a clinical or ROI claim.`,
-  );
+  lines.push(``, `Note: CMS's published, risk-adjusted public measures. Not a clinical or ROI claim.`);
   return lines.join("\n");
+}
+
+// ---------- Contact modal ----------
+
+function buildContactModal() {
+  const el = document.createElement("div");
+  el.className = "role-gate";
+  el.id = "contactModal";
+  el.hidden = true;
+  el.innerHTML = `
+    <div class="role-card contact" role="dialog" aria-modal="true" aria-labelledby="contactTitle">
+      <button class="modal-close" type="button" id="contactClose" aria-label="Close">×</button>
+      <div class="eyebrow">Work with Endurant</div>
+      <h2 id="contactTitle" style="font-size:24px;margin-bottom:6px">Run this on your real panel</h2>
+      <p style="color:var(--muted);font-size:14px;margin-bottom:18px">Tell us where to reach you and we'll show you the same analysis on your attributed patients. No spam — only about a pilot.</p>
+      <form id="contactForm">
+        <input type="text" name="botcheck" class="hp" tabindex="-1" autocomplete="off">
+        <div class="modal-field"><label for="cName">Name</label><input id="cName" name="name" type="text" required></div>
+        <div class="modal-field"><label for="cEmail">Work email</label><input id="cEmail" name="email" type="email" required></div>
+        <div class="modal-field"><label for="cNote">Anything you want us to know (optional)</label><textarea id="cNote" name="note"></textarea></div>
+        <button class="button primary" type="submit" id="contactSubmit" style="width:100%;min-height:46px">Send</button>
+      </form>
+    </div>`;
+  document.body.appendChild(el);
+
+  el.addEventListener("click", (e) => {
+    if (e.target === el) closeContactModal();
+  });
+  document.getElementById("contactClose")!.addEventListener("click", closeContactModal);
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !el.hidden) closeContactModal();
+  });
+  document.getElementById("contactForm")!.addEventListener("submit", submitContact);
+}
+
+function openContactModal() {
+  const el = document.getElementById("contactModal")!;
+  el.hidden = false;
+  (document.getElementById("cName") as HTMLInputElement).focus();
+  window.posthog?.capture?.("contact_opened", {
+    hospital_ccn: currentProfile?.hospital.id,
+    state: currentProfile?.hospital.state,
+    tier: currentProfile?.tier,
+  });
+}
+
+function closeContactModal() {
+  document.getElementById("contactModal")!.hidden = true;
+}
+
+async function submitContact(e: Event) {
+  e.preventDefault();
+  const form = e.target as HTMLFormElement;
+  const fd = new FormData(form);
+  if (fd.get("botcheck")) return; // honeypot
+  const name = String(fd.get("name") ?? "");
+  const email = String(fd.get("email") ?? "");
+  const note = String(fd.get("note") ?? "");
+  const hospital = currentProfile ? `${currentProfile.hospital.name} (${currentProfile.hospital.id})` : "";
+
+  const ok = () => {
+    window.posthog?.capture?.("contact_submitted", {
+      hospital_ccn: currentProfile?.hospital.id,
+      state: currentProfile?.hospital.state,
+      tier: currentProfile?.tier,
+      has_note: note.length > 0,
+    });
+    closeContactModal();
+    showToast("Thanks — we'll be in touch about a pilot.");
+    form.reset();
+  };
+
+  if (CONTACT_KEY) {
+    try {
+      const res = await fetch("https://api.web3forms.com/submit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ access_key: CONTACT_KEY, name, email, hospital, message: note, subject: "Readmission Reality Check — pilot inquiry" }),
+      });
+      if (res.ok) return ok();
+    } catch {
+      /* fall through to mailto */
+    }
+  }
+  // Fallback: open a prefilled email so the lead is never lost.
+  const body = encodeURIComponent(`Name: ${name}\nEmail: ${email}\nHospital: ${hospital}\n\n${note}`);
+  window.location.href = `mailto:${CONTACT_EMAIL}?subject=Readmission%20Reality%20Check%20—%20pilot&body=${body}`;
+  ok();
 }
 
 // ---------- Toast / copy ----------
@@ -382,10 +498,7 @@ function showToast(message: string) {
   toast.textContent = message;
   toast.classList.add("show");
   window.clearTimeout((showToast as unknown as { t: number }).t);
-  (showToast as unknown as { t: number }).t = window.setTimeout(
-    () => toast.classList.remove("show"),
-    2200,
-  );
+  (showToast as unknown as { t: number }).t = window.setTimeout(() => toast.classList.remove("show"), 2400);
 }
 
 function copyText(text: string, message: string) {
@@ -406,6 +519,7 @@ function copyText(text: string, message: string) {
 // ---------- Init ----------
 
 restartBtn.addEventListener("click", renderLanding);
+buildContactModal();
 
 loadData()
   .then(renderLanding)

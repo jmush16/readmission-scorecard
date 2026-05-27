@@ -6,6 +6,8 @@ const SUPPRESSED = new Set([
   "na",
   "not available",
   "too few to report",
+  "number of cases too small",
+  "not applicable",
   "",
 ]);
 
@@ -30,4 +32,21 @@ export function median(values: number[]): number | null {
 export function round(value: number, decimals = 3): number {
   const f = 10 ** decimals;
   return Math.round(value * f) / f;
+}
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** "07/01/2023" -> "Jul 2023". Tolerant of missing/odd input. */
+function monthYear(date: string | undefined): string {
+  if (!date) return "";
+  const [mm, , yyyy] = date.split("/");
+  const m = Number(mm);
+  return m >= 1 && m <= 12 ? `${MONTHS[m - 1]} ${yyyy}` : date;
+}
+
+/** "Jul 2023 – Jun 2024" from a CMS start/end pair. */
+export function formatPeriod(period: { start: string; end: string }): string {
+  const a = monthYear(period.start);
+  const b = monthYear(period.end);
+  return a && b ? `${a} – ${b}` : a || b || "—";
 }

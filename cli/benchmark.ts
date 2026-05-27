@@ -10,6 +10,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { benchmarkHospital } from "../src/lib/hrrp/benchmark";
+import { buildProfile } from "../src/lib/hrrp/profile";
 import { researchPrompt } from "../src/lib/hrrp/research";
 import type {
   BenchmarkResult,
@@ -91,7 +92,12 @@ function loadManifest(): SnapshotManifest {
 
 function main() {
   const entry = findEntry();
-  const result = benchmarkHospital(entry.id, loadState(entry.state));
+  const shard = loadState(entry.state);
+  if (process.argv.includes("--profile")) {
+    console.log(JSON.stringify(buildProfile(entry.id, shard), null, 2));
+    return;
+  }
+  const result = benchmarkHospital(entry.id, shard);
   if (process.argv.includes("--research")) {
     console.log(researchPrompt(result, loadManifest().hrrpPeriod));
   } else if (process.argv.includes("--json")) {

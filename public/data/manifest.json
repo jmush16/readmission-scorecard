@@ -1,18 +1,20 @@
 {
-  "version": 1,
-  "fetchedAt": "2026-05-27T16:50:03.241Z",
+  "version": 2,
+  "fetchedAt": "2026-05-27T17:51:14.718Z",
   "hrrpPeriod": {
     "start": "07/01/2021",
     "end": "06/30/2024"
   },
   "sources": {
     "hrrp": "9n3s-kdb3",
-    "hospitals": "xubh-q36u"
+    "hospitals": "xubh-q36u",
+    "unplanned": "632h-zaca"
   },
   "states": [
     "AK",
     "AL",
     "AR",
+    "AS",
     "AZ",
     "CA",
     "CO",
@@ -21,6 +23,7 @@
     "DE",
     "FL",
     "GA",
+    "GU",
     "HI",
     "IA",
     "ID",
@@ -35,6 +38,7 @@
     "MI",
     "MN",
     "MO",
+    "MP",
     "MS",
     "MT",
     "NC",
@@ -49,6 +53,7 @@
     "OK",
     "OR",
     "PA",
+    "PR",
     "RI",
     "SC",
     "SD",
@@ -56,6 +61,7 @@
     "TX",
     "UT",
     "VA",
+    "VI",
     "VT",
     "WA",
     "WI",
@@ -70,9 +76,47 @@
     "HIP_KNEE",
     "CABG"
   ],
+  "measurePeriods": {
+    "Hybrid_HWR": {
+      "start": "07/01/2023",
+      "end": "06/30/2024"
+    },
+    "OP_35_ADM": {
+      "start": "01/01/2024",
+      "end": "12/31/2024"
+    },
+    "OP_35_ED": {
+      "start": "01/01/2024",
+      "end": "12/31/2024"
+    },
+    "READM_30_AMI": {
+      "start": "07/01/2021",
+      "end": "06/30/2024"
+    },
+    "READM_30_CABG": {
+      "start": "07/01/2021",
+      "end": "06/30/2024"
+    },
+    "READM_30_COPD": {
+      "start": "07/01/2021",
+      "end": "06/30/2024"
+    },
+    "READM_30_HF": {
+      "start": "07/01/2021",
+      "end": "06/30/2024"
+    },
+    "READM_30_HIP_KNEE": {
+      "start": "07/01/2021",
+      "end": "06/30/2024"
+    },
+    "READM_30_PN": {
+      "start": "07/01/2021",
+      "end": "06/30/2024"
+    }
+  },
   "counts": {
-    "hospitals": 3055,
-    "hrrpRows": 18330,
-    "suppressedRatios": 6610
+    "hospitals": 5432,
+    "withRates": 4234,
+    "suppressedRatios": 6571
   }
 }
