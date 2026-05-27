@@ -25,15 +25,19 @@ export function researchPrompt(r: BenchmarkResult, period: { start: string; end:
     `${r.hospital.name} — ${r.hospital.county ?? "?"} County, ${r.hospital.state} (CCN ${r.hospital.id})`,
     `Penalized on ${r.penalizedCount} of ${r.reportedCount} measured conditions. Biggest gap vs. state peers: ${worst}.`,
     ...r.conditions.map(conditionLine),
+    r.reportedCount === 0
+      ? `\nNOTE: CMS suppressed every HRRP measure for this hospital — likely a small, critical-access, or specialty facility below CMS's reporting threshold. Prioritize finding alternative CURRENT quality signals (Care Compare overall rating, state reports) since HRRP can't characterize it.`
+      : ``,
     ``,
     `RESEARCH TASKS — do focused web research and cite every external claim with a link; separate verified fact from inference; never invent numbers:`,
-    `1. CURRENT CONSEQUENCE: this hospital's most recent HRRP payment-reduction percentage and fiscal year (CMS payment-adjustment file / Hospital Care Compare), plus any newer (2024–2026) CMS readmission or quality results for it.`,
-    `2. WHAT CHANGED HERE since 2024: new transitional-care or readmission-reduction programs, care-management leadership hires, quality awards or citations, recent local news. Flag anything you cannot verify.`,
-    `3. WHAT'S COMING: 2025–2026 CMS regulatory changes affecting readmissions — the TEAM model (is this hospital in a mandatory CBSA?), IPPS measure changes — and any ${r.hospital.state} Medicaid or state-level readmission programs.`,
-    `4. WHAT WORKS: the 2–3 highest-evidence interventions to cut 30-day readmissions for ${worst}, with effect sizes and citations, and the CURRENT Transitional Care Management billing values (CPT 99495/99496) so the program can be revenue-positive.`,
-    `5. NEXT STEPS: 3–5 specific, impact-ordered moves a care-transitions leader can put in front of a VP or CFO.`,
+    `1. CURRENT STANDING — how is this hospital doing RIGHT NOW overall? Most recent CMS Care Compare overall star rating; current 30-day readmission and mortality rates vs. the national rate; patient experience (HCAHPS); and the direction of travel (improving or worsening) over the last 2–3 years.`,
+    `2. CURRENT CONSEQUENCE: this hospital's most recent HRRP payment-reduction percentage and fiscal year (CMS payment-adjustment file / Hospital Care Compare), plus any newer (2024–2026) CMS readmission results.`,
+    `3. WHAT CHANGED HERE since 2024: new transitional-care or readmission-reduction programs, care-management leadership hires, quality awards or citations, recent local news. Flag anything you cannot verify.`,
+    `4. WHAT'S COMING: 2025–2026 CMS regulatory changes affecting readmissions — the TEAM model (is this hospital in a mandatory CBSA?), IPPS measure changes — and any ${r.hospital.state} Medicaid or state-level readmission programs.`,
+    `5. WHAT WORKS: the 2–3 highest-evidence interventions to cut 30-day readmissions for ${worst}, with effect sizes and citations, and the CURRENT Transitional Care Management billing values (CPT 99495/99496) so the program can be revenue-positive.`,
+    `6. NEXT STEPS: 3–5 specific, impact-ordered moves a care-transitions leader can put in front of a VP or CFO.`,
     ``,
-    `THEN: produce an upgraded one-page brief that merges the CMS baseline above with your current findings, suitable to hand to leadership. This is non-PHI public analysis, not clinical advice.`,
+    `THEN: produce an upgraded one-page brief that merges the CMS baseline above with your current findings, leading with how the hospital is doing now. This is non-PHI public analysis, not clinical advice.`,
   ].join("\n");
 }
 

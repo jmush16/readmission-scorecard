@@ -154,8 +154,9 @@ function renderVerdict(r: BenchmarkResult, shard: HospitalRecord[]) {
         ? `<span class="badge ok">Not currently in penalty territory (${r.reportedCount} measured)</span>`
         : `<span class="badge">CMS suppressed every measure for this hospital</span>`;
 
-  const heroHtml = hero
-    ? `<div class="hero">
+  const heroHtml =
+    hero
+      ? `<div class="hero">
          <div class="ratio-big">
            <strong style="color:${hero.penalized ? "var(--rose)" : "var(--green)"}">${fmtRatio(hero.excessRatio)}</strong>
            <small>excess readmission ratio</small>
@@ -170,7 +171,7 @@ function renderVerdict(r: BenchmarkResult, shard: HospitalRecord[]) {
            <p class="peers">${rankSentence(hero, r.hospital.state)}</p>
          </div>
        </div>`
-    : "";
+      : limitedDataCard(r, shard);
 
   const rows = r.conditions
     .map((c) => {
@@ -201,7 +202,7 @@ function renderVerdict(r: BenchmarkResult, shard: HospitalRecord[]) {
       <div class="verdict-top">
         <div>
           <h2>${r.hospital.name}</h2>
-          <div class="place">${r.hospital.county ?? "?"} County, ${r.hospital.state}</div>
+          <div class="place">${r.hospital.county ? `${r.hospital.county} County, ` : ""}${r.hospital.state}</div>
         </div>
         ${penaltyBadge}
       </div>
@@ -259,6 +260,37 @@ function renderVerdict(r: BenchmarkResult, shard: HospitalRecord[]) {
   (document.getElementById("openChatgpt") as HTMLAnchorElement).href = links.chatgpt;
   (document.getElementById("openClaude") as HTMLAnchorElement).href = links.claude;
   (document.getElementById("openPerplexity") as HTMLAnchorElement).href = links.perplexity;
+}
+
+function limitedDataCard(r: BenchmarkResult, shard: HospitalRecord[]): string {
+  const st = r.hospital.state;
+  // Give them the state picture even though their own numbers are suppressed.
+  const pairs: [ConditionKey, string][] = [
+    ["HF", "heart failure"],
+    ["COPD", "COPD"],
+    ["PN", "pneumonia"],
+  ];
+  const context = pairs
+    .map(([cond, label]) => {
+      const sp = statePenaltyCount(shard, cond);
+      if (sp.reported === 0) return "";
+      return `<li><b>${sp.penalized} of ${sp.reported}</b><span>${st} hospitals are penalized on ${label}</span></li>`;
+    })
+    .filter(Boolean)
+    .join("");
+
+  return `<div class="hero" style="grid-template-columns:1fr">
+    <div class="hero-copy">
+      <h3>CMS doesn't publish readmission numbers for this hospital</h3>
+      <p>Every HRRP measure here is suppressed — almost always because the hospital is small,
+      critical-access, or specialty, with too few cases for CMS to report without risking patient privacy.
+      That's not a clean bill of health; it means the public benchmark can't see you.</p>
+      <p class="peers">Two ways to still get a real read: see how your state performs (below), and run the
+      AI research action to pull your hospital's <b>current</b> standing from CMS Care Compare and state
+      sources, which cover smaller facilities the HRRP file doesn't.</p>
+      ${context ? `<ul class="summary-list" style="margin-top:14px">${context}</ul>` : ""}
+    </div>
+  </div>`;
 }
 
 function playbookPanel(condition: ConditionKey): string {
