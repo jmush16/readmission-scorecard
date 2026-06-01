@@ -1,6 +1,7 @@
-// Shared contract for the Readmission Reality Check.
-// Built on CMS Hospital Readmissions Reduction Program (HRRP, dataset
-// 9n3s-kdb3) joined to CMS Hospital General Information (xubh-q36u).
+// Shared contract for The Post-Discharge Gap.
+// Built on CMS Hospital Readmissions Reduction Program (HRRP, 9n3s-kdb3),
+// Unplanned Hospital Visits (632h-zaca), Hospital General Information
+// (xubh-q36u), SNF Quality Reporting (fykj-qjee), and Home Health (6jpm-sxkc).
 // Reused by the web UI, the CLI, and any future MCP server.
 
 export type ConditionKey = "HF" | "AMI" | "COPD" | "PN" | "CABG" | "HIP_KNEE";
