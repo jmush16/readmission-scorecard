@@ -20,6 +20,21 @@ export function num(raw: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/**
+ * CMS publishes a "compared to national" verdict string. Resolve it to a
+ * direction: true = worse, false = better, null = no different / unknown.
+ * Case-insensitive, so it covers both the readmission-rate phrasing
+ * ("Better than the National Rate") and the home-health/SNF phrasing
+ * ("Worse Than National Rate"). "Same As" / "No Different" / "—" -> null.
+ */
+export function isWorse(comparedToNational: string | null): boolean | null {
+  if (!comparedToNational) return null;
+  const s = comparedToNational.toLowerCase();
+  if (s.includes("worse") || s.includes("more days")) return true;
+  if (s.includes("better") || s.includes("fewer days")) return false;
+  return null; // "no different" / "same as" / "average"
+}
+
 /** Median over the provided numbers; null if empty. */
 export function median(values: number[]): number | null {
   if (values.length === 0) return null;

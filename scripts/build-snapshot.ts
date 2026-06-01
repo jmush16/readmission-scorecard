@@ -11,6 +11,9 @@
 //   xubh-q36u  Hospital General Information  -> the universe (every hospital) + rating
 //   9n3s-kdb3  HRRP                          -> excess ratio + penalty (lagged audit)
 //   632h-zaca  Unplanned Hospital Visits     -> rates incl. fresher 2023-24 / 2024 measures
+//   fykj-qjee  SNF Quality Reporting (long)  -> post-acute: 30-day rehospitalization + DTC (county-scoped)
+//   6jpm-sxkc  Home Health agency data       -> post-acute: PPH / PPR / DTC (state-scoped, no county)
+//   97z8-de96  Home Health national row      -> the published national reference rates
 
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -20,10 +23,18 @@ import {
   type ConditionKey,
   type HospitalRecord,
   type HospitalIndexEntry,
+  type PostAcuteShard,
   type RateMeasure,
   type SnapshotManifest,
+  type SnfAggregate,
 } from "../src/lib/hrrp/types";
-import { num } from "../src/lib/hrrp/normalize";
+import { median, num, round } from "../src/lib/hrrp/normalize";
+import {
+  aggregateHh,
+  aggregateSnf,
+  type HhAgencyRaw,
+  type SnfFacilityRaw,
+} from "../src/lib/hrrp/postacute";
 
 const API = "https://data.cms.gov/provider-data/api/1/datastore/query";
 const PAGE = 1000;
@@ -44,6 +55,36 @@ async function fetchAll(datasetId: string): Promise<Row[]> {
     const rows = json.results ?? [];
     out.push(...rows);
     process.stdout.write(`\r  ${datasetId}: ${out.length} rows`);
+    if (rows.length < PAGE) break;
+    offset += PAGE;
+  }
+  process.stdout.write("\n");
+  return out;
+}
+
+/**
+ * Fetch a single measure_code from a long-format dataset (e.g. SNF QRP, which
+ * is 837k rows across ~56 codes). Server-side filtering keeps us to the ~15k
+ * rows we actually need instead of paginating the whole file.
+ */
+async function fetchFiltered(datasetId: string, property: string, value: string): Promise<Row[]> {
+  const out: Row[] = [];
+  let offset = 0;
+  for (;;) {
+    const params = new URLSearchParams({
+      limit: String(PAGE),
+      offset: String(offset),
+      "conditions[0][property]": property,
+      "conditions[0][value]": value,
+      "conditions[0][operator]": "=",
+    });
+    const url = `${API}/${datasetId}/0?${params.toString()}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`${datasetId}/${value} HTTP ${res.status} at offset ${offset}`);
+    const json = (await res.json()) as { results?: Row[] };
+    const rows = json.results ?? [];
+    out.push(...rows);
+    process.stdout.write(`\r  ${datasetId} ${value}: ${out.length} rows`);
     if (rows.length < PAGE) break;
     offset += PAGE;
   }
@@ -144,9 +185,84 @@ async function main() {
     rec.rates![id] = m;
   }
 
+  // ----- 3b. Post-acute layer: where discharged patients GO -----
+  // SNF QRP is long-format and carries its own county, so we filter to the four
+  // codes we need and pivot by CCN. Home Health has no county field, so it
+  // aggregates at the state level. PPR_RSRR is the spine (name/state/county).
+  const SNF = "fykj-qjee";
+  console.log("Fetching post-acute data (SNF QRP filtered by measure, Home Health)...");
+  const [snfRsrr, snfRsrrVerdict, snfDtc, snfDtcVerdict, hh, hhNational] = await Promise.all([
+    fetchFiltered(SNF, "measure_code", "S_004_01_PPR_PD_RSRR"),
+    fetchFiltered(SNF, "measure_code", "S_004_01_PPR_PD_COMP_PERF"),
+    fetchFiltered(SNF, "measure_code", "S_005_02_DTC_RS_RATE"),
+    fetchFiltered(SNF, "measure_code", "S_005_02_DTC_COMP_PERF"),
+    fetchAll("6jpm-sxkc"),
+    fetchAll("97z8-de96"),
+  ]);
+
+  const snfPeriod = snfRsrr[0]?.start_date
+    ? { start: snfRsrr[0].start_date, end: snfRsrr[0].end_date }
+    : { start: "", end: "" };
+  const hhPeriod = { start: "", end: "" }; // HH agency file carries no measure window
+
+  // COMP_PERF / DTC rows carry the verdict (or value) in `score`, keyed by CCN.
+  const pprVerdictBy = new Map(snfRsrrVerdict.map((r) => [r.cms_certification_number_ccn, r.score?.trim() || null]));
+  const dtcRateBy = new Map(snfDtc.map((r) => [r.cms_certification_number_ccn, num(r.score)]));
+
+  const snfByState = new Map<string, SnfFacilityRaw[]>();
+  const snfByStateCounty = new Map<string, Map<string, SnfFacilityRaw[]>>();
+  for (const r of snfRsrr) {
+    if (!r.state) continue;
+    const county = r.countyparish?.trim().toUpperCase() || null;
+    const fac: SnfFacilityRaw = {
+      name: (r.provider_name ?? "").trim(),
+      county,
+      ppr: num(r.score),
+      pprVerdict: pprVerdictBy.get(r.cms_certification_number_ccn) ?? null,
+      dtc: dtcRateBy.get(r.cms_certification_number_ccn) ?? null,
+    };
+    (snfByState.get(r.state) ?? snfByState.set(r.state, []).get(r.state)!).push(fac);
+    if (county) {
+      let cm = snfByStateCounty.get(r.state);
+      if (!cm) snfByStateCounty.set(r.state, (cm = new Map()));
+      (cm.get(county) ?? cm.set(county, []).get(county)!).push(fac);
+    }
+  }
+  if (snfByState.size === 0) {
+    throw new Error("SNF QRP returned no PPR rows — the measure code may have changed.");
+  }
+
+  const hhByState = new Map<string, HhAgencyRaw[]>();
+  for (const r of hh) {
+    if (!r.state) continue;
+    (hhByState.get(r.state) ?? hhByState.set(r.state, []).get(r.state)!).push({
+      pph: num(r.pph_riskstandardized_rate),
+      pphVerdict: r.pph_performance_categorization?.trim() || null,
+      ppr: num(r.ppr_riskstandardized_rate),
+      dtc: num(r.dtc_riskstandardized_rate),
+    });
+  }
+  const hhAgencyCount = hh.length;
+  if (![...hhByState.values()].flat().some((a) => a.pph !== null)) {
+    throw new Error("Home Health PPH column missing/empty — the HHVBP measure set may have changed.");
+  }
+
+  // National reference: HH from CMS's published national row; SNF from the
+  // snapshot median of reporting facilities (CMS publishes no SNF national rate).
+  const natRow = hhNational[0] ?? {};
+  const allSnfPpr = [...snfByState.values()].flat().map((f) => f.ppr).filter((n): n is number => n !== null);
+  const snfPprNationalMedian = median(allSnfPpr);
+  const national = {
+    snfPprMedian: snfPprNationalMedian === null ? null : round(snfPprNationalMedian, 1),
+    hhPph: num(natRow.pph_national_observed_rate),
+    hhPpr: num(natRow.ppr_national_observed_rate),
+    hhDtc: num(natRow.dtc_national_observed_rate),
+  };
+
   // ----- 4. Shard + write -----
   rmSync(OUT, { recursive: true, force: true });
   mkdirSync(join(OUT, "states"), { recursive: true });
+  mkdirSync(join(OUT, "postacute"), { recursive: true });
 
   const byState = new Map<string, HospitalRecord[]>();
   const index: HospitalIndexEntry[] = [];
@@ -169,25 +285,76 @@ async function main() {
     throw new Error(`A state shard is ${(maxShard / 1e6).toFixed(2)} MB — too large; trim measures.`);
   }
 
+  // Post-acute shards: one per state (so the lazy fetch never 404s). Aggregates
+  // + top-3 only, kept separate from the hospital shards so we add zero bytes
+  // to the hot path.
+  let maxPa = 0;
+  let snfCounties = 0;
+  let snfFacilities = 0;
+  for (const st of states) {
+    const stateSnf = snfByState.get(st) ?? null;
+    const stateHh = hhByState.get(st) ?? null;
+    const countyMap = snfByStateCounty.get(st);
+    const counties: Record<string, { snf: SnfAggregate | null }> = {};
+    if (countyMap) {
+      for (const [cty, facs] of countyMap) {
+        counties[cty] = { snf: aggregateSnf(facs) };
+        snfCounties += 1;
+      }
+    }
+    snfFacilities += stateSnf?.length ?? 0;
+    const shard: PostAcuteShard = {
+      national,
+      state: {
+        snf: stateSnf ? aggregateSnf(stateSnf) : null,
+        hh: stateHh ? aggregateHh(stateHh) : null,
+      },
+      counties,
+    };
+    const json = JSON.stringify(shard);
+    maxPa = Math.max(maxPa, json.length);
+    writeFileSync(join(OUT, "postacute", `${st}.json`), json);
+  }
+  if (maxPa > 1_400_000) {
+    throw new Error(`A post-acute shard is ${(maxPa / 1e6).toFixed(2)} MB — too large; trim top-N or fields.`);
+  }
+
   index.sort((a, b) => a.name.localeCompare(b.name));
   writeFileSync(join(OUT, "hospitals.json"), JSON.stringify(index));
 
   const manifest: SnapshotManifest = {
-    version: 2,
+    version: 3,
     fetchedAt: new Date().toISOString(),
     hrrpPeriod: period,
-    sources: { hrrp: "9n3s-kdb3", hospitals: "xubh-q36u", unplanned: "632h-zaca" },
+    sources: {
+      hrrp: "9n3s-kdb3",
+      hospitals: "xubh-q36u",
+      unplanned: "632h-zaca",
+      snfQrp: SNF,
+      homeHealth: "6jpm-sxkc",
+      homeHealthNational: "97z8-de96",
+    },
     states,
     conditions: ["HF", "COPD", "PN", "AMI", "HIP_KNEE", "CABG"],
     measurePeriods,
-    counts: { hospitals: byId.size, withRates, suppressedRatios },
+    postAcutePeriods: { snfPpr: snfPeriod, homeHealth: hhPeriod },
+    counts: {
+      hospitals: byId.size,
+      withRates,
+      suppressedRatios,
+      snfFacilities,
+      hhAgencies: hhAgencyCount,
+      snfCounties,
+    },
   };
   writeFileSync(join(OUT, "manifest.json"), JSON.stringify(manifest, null, 2));
 
   console.log(
     `\nDone. ${byId.size} hospitals across ${states.length} states; ${withRates} have rate measures. ` +
       `${suppressedRatios} suppressed HRRP ratios. ${hrrpOrphans} HRRP orphans dropped. ` +
-      `Largest shard ${(maxShard / 1e6).toFixed(2)} MB.`,
+      `Largest hospital shard ${(maxShard / 1e6).toFixed(2)} MB.\n` +
+      `Post-acute: ${snfFacilities} SNFs across ${snfCounties} state-counties, ${hhAgencyCount} home-health agencies. ` +
+      `Largest post-acute shard ${(maxPa / 1e6).toFixed(2)} MB.`,
   );
 }
 

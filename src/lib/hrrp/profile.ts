@@ -7,18 +7,10 @@ import type {
 } from "./types";
 import { RATE_LABELS } from "./types";
 import { benchmarkHospital } from "./benchmark";
-import { formatPeriod } from "./normalize";
+import { formatPeriod, isWorse } from "./normalize";
 
 // Priority order for the single headline number: freshest + most universal first.
 const HEADLINE_ORDER = ["Hybrid_HWR", "READM_30_HF", "READM_30_COPD", "READM_30_PN"];
-
-function isWorse(comparedToNational: string | null): boolean | null {
-  if (!comparedToNational) return null;
-  const s = comparedToNational.toLowerCase();
-  if (s.includes("worse") || s.includes("more days")) return true;
-  if (s.includes("better") || s.includes("fewer days")) return false;
-  return null; // "no different" / "average"
-}
 
 function presentRates(rec: HospitalRecord): RateMeasure[] {
   return Object.values(rec.rates ?? {}).filter((m) => m.score !== null);

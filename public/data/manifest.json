@@ -1,6 +1,6 @@
 {
-  "version": 2,
-  "fetchedAt": "2026-05-27T17:51:14.718Z",
+  "version": 3,
+  "fetchedAt": "2026-06-01T11:33:32.212Z",
   "hrrpPeriod": {
     "start": "07/01/2021",
     "end": "06/30/2024"
@@ -8,7 +8,10 @@
   "sources": {
     "hrrp": "9n3s-kdb3",
     "hospitals": "xubh-q36u",
-    "unplanned": "632h-zaca"
+    "unplanned": "632h-zaca",
+    "snfQrp": "fykj-qjee",
+    "homeHealth": "6jpm-sxkc",
+    "homeHealthNational": "97z8-de96"
   },
   "states": [
     "AK",
@@ -114,9 +117,22 @@
       "end": "06/30/2024"
     }
   },
+  "postAcutePeriods": {
+    "snfPpr": {
+      "start": "10/01/2022",
+      "end": "09/30/2024"
+    },
+    "homeHealth": {
+      "start": "",
+      "end": ""
+    }
+  },
   "counts": {
     "hospitals": 5432,
     "withRates": 4234,
-    "suppressedRatios": 6571
+    "suppressedRatios": 6571,
+    "snfFacilities": 14700,
+    "hhAgencies": 12392,
+    "snfCounties": 2850
   }
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Readmission Reality Check — CLI surface.
+// The Post-Discharge Gap — CLI surface.
 // Reuses the exact benchmark core as the web tool, reading the committed
 // snapshot. Any coding agent can shell into this; no network, no PHI.
 //

@@ -1,7 +1,8 @@
 name: Refresh CMS data snapshot
 
-# CMS HRRP updates roughly annually. Re-pull monthly and open a PR so the
-# data change is reviewable before it ships.
+# CMS provider-data (HRRP, Unplanned Visits, Hospital Info, SNF QRP, Home Health)
+# updates roughly annually/quarterly. Re-pull monthly and open a PR so the data
+# change — including the post-acute join coverage — is reviewable before it ships.
 on:
   schedule:
     - cron: "0 9 1 * *" # 09:00 UTC on the 1st of each month
@@ -29,7 +30,10 @@ jobs:
           commit-message: "Refresh CMS data snapshot"
           title: "Refresh CMS data snapshot"
           body: |
-            Automated monthly refresh of the CMS HRRP + Hospital General Info snapshot.
-            Review the diff under `public/data/` before merging.
+            Automated monthly refresh of the CMS snapshot (HRRP, Unplanned Visits,
+            Hospital General Info, SNF Quality Reporting, Home Health).
+            Review the diff under `public/data/` before merging — check the build
+            log's post-acute counts (SNFs, state-counties, home-health agencies)
+            for any large coverage drop that would signal a CMS schema change.
           branch: data/refresh
           delete-branch: true

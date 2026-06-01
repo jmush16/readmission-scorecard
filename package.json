@@ -1,9 +1,9 @@
 {
-  "name": "follow-through-audit",
+  "name": "post-discharge-gap",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Heart Failure Follow-Up Readiness Audit — a non-PHI workflow diagnostic. Web tool + reusable scoring core.",
+  "description": "The Post-Discharge Gap — a free, non-PHI CMS tool: a hospital's readmission/penalty exposure plus where its patients go next (SNF + home health) and how often they bounce back.",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
