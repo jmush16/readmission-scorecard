@@ -4,3 +4,6 @@ dist
 .DS_Store
 .vite
 .vercel
+
+# Local working notes (not shipped)
+HANDOFF.md
