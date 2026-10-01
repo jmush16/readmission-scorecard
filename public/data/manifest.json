@@ -1,6 +1,6 @@
 {
   "version": 3,
-  "fetchedAt": "2026-06-01T11:33:32.212Z",
+  "fetchedAt": "2026-10-01T09:17:14.775Z",
   "hrrpPeriod": {
     "start": "07/01/2021",
     "end": "06/30/2024"
@@ -81,8 +81,8 @@
   ],
   "measurePeriods": {
     "Hybrid_HWR": {
-      "start": "07/01/2023",
-      "end": "06/30/2024"
+      "start": "07/01/2024",
+      "end": "06/30/2025"
     },
     "OP_35_ADM": {
       "start": "01/01/2024",
@@ -93,28 +93,28 @@
       "end": "12/31/2024"
     },
     "READM_30_AMI": {
-      "start": "07/01/2021",
-      "end": "06/30/2024"
+      "start": "07/01/2023",
+      "end": "06/30/2025"
     },
     "READM_30_CABG": {
-      "start": "07/01/2021",
-      "end": "06/30/2024"
+      "start": "07/01/2023",
+      "end": "06/30/2025"
     },
     "READM_30_COPD": {
-      "start": "07/01/2021",
-      "end": "06/30/2024"
+      "start": "07/01/2023",
+      "end": "06/30/2025"
     },
     "READM_30_HF": {
-      "start": "07/01/2021",
-      "end": "06/30/2024"
+      "start": "07/01/2023",
+      "end": "06/30/2025"
     },
     "READM_30_HIP_KNEE": {
-      "start": "07/01/2021",
-      "end": "06/30/2024"
+      "start": "07/01/2023",
+      "end": "06/30/2025"
     },
     "READM_30_PN": {
-      "start": "07/01/2021",
-      "end": "06/30/2024"
+      "start": "07/01/2023",
+      "end": "06/30/2025"
     }
   },
   "postAcutePeriods": {
@@ -128,11 +128,11 @@
     }
   },
   "counts": {
-    "hospitals": 5432,
-    "withRates": 4234,
-    "suppressedRatios": 6571,
-    "snfFacilities": 14700,
-    "hhAgencies": 12392,
-    "snfCounties": 2850
+    "hospitals": 5419,
+    "withRates": 3896,
+    "suppressedRatios": 6529,
+    "snfFacilities": 14690,
+    "hhAgencies": 12460,
+    "snfCounties": 2852
   }
 }
